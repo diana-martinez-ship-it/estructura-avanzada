@@ -1,0 +1,80 @@
+version: "3.8"
+
+services:
+  # 🐰 RABBITMQ - Broker de mensajería (ya existente)
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq-ecomarket
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: pass
+    restart: unless-stopped
+    networks:
+      - ecomarket-network
+
+  # 🌐 NGINX - Balanceador de Carga
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-loadbalancer
+    ports:
+      - "80:80"      # Puerto HTTP principal
+      - "8080:8080"  # Puerto para monitoreo (opcional)
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - ecomarket-api-1
+      - ecomarket-api-2
+    restart: unless-stopped
+    networks:
+      - ecomarket-network
+
+  # 🟢 INSTANCIA 1 - Primera instancia de la API
+  ecomarket-api-1:
+    build: .
+    container_name: ecomarket-api-1
+    environment:
+      - INSTANCE_ID=1
+    ports:
+      - "8001:8000"  # Exponemos puerto para debugging directo
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+    networks:
+      - ecomarket-network
+
+  # 🔵 INSTANCIA 2 - Segunda instancia de la API
+  ecomarket-api-2:
+    build: .
+    container_name: ecomarket-api-2
+    environment:
+      - INSTANCE_ID=2
+    ports:
+      - "8002:8000"  # Exponemos puerto para debugging directo
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+    networks:
+      - ecomarket-network
+
+  # 🟡 INSTANCIA 3 - Tercera instancia (opcional, para probar escalabilidad)
+  # Descomenta si quieres agregar una tercera instancia
+  # ecomarket-api-3:
+  #   build: .
+  #   container_name: ecomarket-api-3
+  #   environment:
+  #     - INSTANCE_ID=3
+  #   ports:
+  #     - "8003:8000"
+  #   depends_on:
+  #     - rabbitmq
+  #   restart: unless-stopped
+  #   networks:
+  #     - ecomarket-network
+
+# 🌐 Red compartida para todos los servicios
+networks:
+  ecomarket-network:
+    driver: bridge

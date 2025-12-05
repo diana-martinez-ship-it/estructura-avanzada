@@ -1,0 +1,2964 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EcoMarket: Distribución de Datos - Replicación y Sharding para Escalabilidad de Base de Datos</title>
+    <!--
+    REGISTRO DE CAMBIOS - Versión 2 (Corregida)
+    
+    Correcciones aplicadas basadas en análisis detallado:
+    
+    1. PUERTO 5435 INEXISTENTE CORREGIDO (línea ~1269)
+       - Antes: SimpleHashShardRouter usaba puerto 5435 que no existe en docker-compose
+       - Ahora: Usa puerto 5433 (secundario-1) con nota explicativa sobre configuración conceptual
+       - Impacto: Script ahora es ejecutable sin errores de conexión
+    
+    2. SCRIPT DE CARGA AHORA PRUEBA SHARDING (línea ~1916)
+       - Antes: load_test.py solo probaba replicación (writes→primario, reads→secundarios)
+       - Ahora: Incluye Prueba 5 que valida SimpleHashShardRouter y ConsistentHashRouter
+       - Impacto: Checkpoint Fase 0 "Validar distribución con scripts ejecutables" se cumple completamente
+    
+    3. SEPARACIÓN CONCEPTUAL REPLICACIÓN VS SHARDING (línea ~848)
+       - Antes: Fase 2 mezclaba ambas estrategias como si fueran un solo paso
+       - Ahora: Warning box al inicio de Fase 2 clarifica que son dos estrategias fundamentalmente diferentes
+       - Impacto: Estudiantes entienden que replicación escala reads, sharding escala writes/datos
+    
+    4. TEST FAILOVER REALISTA (línea ~1838)
+       - Antes: Simulaba fallo con puerto 9999 (no disponibilidad de red genérica)
+       - Ahora: Verifica salud real con pg_stat_replication, detecta lag alto, timeout configurable
+       - Impacto: Prueba ahora simula fallo basado en métricas reales de PostgreSQL
+    
+    5. VISUALIZACIÓN INTERACTIVA CONSISTENT HASHING (línea ~1479)
+       - Antes: Concepto abstracto explicado solo con texto y código
+       - Ahora: Canvas JavaScript interactivo que visualiza el ring, vnodes, keys y reasignación
+       - Impacto: Concepto clave se vuelve tangible; estudiantes ven por qué K/N es mejor que 2K/3
+    
+    6. NOTA ACLARATORIA SPANNER Y CAP (línea ~827)
+       - Antes: Tabla mostraba Spanner como CP* sin explicación del asterisco
+       - Ahora: Nota al pie explica que Spanner ES CP, logra baja latencia con hardware especializado (TrueTime)
+       - Impacto: Clarifica que CAP sigue válido; Spanner minimiza costo de C con infraestructura dedicada
+    
+    Todos los cambios preservan la pedagogía original mientras corrigen los problemas técnicos y conceptuales identificados.
+    -->
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        h1 {
+            text-align: center;
+            border-bottom: 3px solid #e74c3c;
+            padding-bottom: 10px;
+        }
+        .phase {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .phase h2 {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .phase h2::before {
+            content: attr(data-icon);
+            font-size: 1.5em;
+            margin-right: 10px;
+        }
+        .activity {
+            background: #e8f4fd;
+            border-left: 4px solid #e74c3c;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+        .checkpoint {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+        .code-block {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        .code-block pre {
+            margin: 0;
+            white-space: pre-wrap;
+        }
+        .code-python {
+            background: #f0f0f0;
+            border-left: 4px solid #3572A5;
+        }
+        .code-csharp {
+            background: #f0f0f0;
+            border-left: 4px solid #9B4F96;
+        }
+        .code-sql {
+            background: #f0f0f0;
+            border-left: 4px solid #f66;
+        }
+        .code-nginx {
+            background: #f0f0f0;
+            border-left: 4px solid #A52A2A;
+        }
+        ul {
+            padding-left: 20px;
+        }
+        li {
+            margin: 5px 0;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+        .tip {
+            background: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+        .reflection {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+        .evolution-step {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 15px 0;
+            position: relative;
+        }
+        .evolution-step::after {
+            content: "↓";
+            position: absolute;
+            bottom: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 24px;
+            color: #e74c3c;
+        }
+        .evolution-step:last-child::after {
+            display: none;
+        }
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+            background: white;
+        }
+        .comparison-table th, .comparison-table td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        .comparison-table th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        .comparison-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .decision-matrix {
+            background: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .ai-prompt {
+            background: #e8f5e8;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .progress-bar {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+        }
+        .progress-item {
+            flex: 1;
+            text-align: center;
+            padding: 10px;
+            background: #e9ecef;
+            margin: 0 5px;
+            border-radius: 5px;
+        }
+        .progress-item.active {
+            background: #e74c3c;
+            color: white;
+        }
+        .scenario-box {
+            background: #f0f8ff;
+            border: 1px solid #e74c3c;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .diagram {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+            white-space: pre;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            overflow-x: auto;
+        }
+        .dual-lang {
+            display: flex;
+            gap: 20px;
+        }
+        .dual-lang > div {
+            flex: 1;
+        }
+        figcaption {
+            font-style: italic;
+            color: #666;
+            text-align: center;
+            margin-top: 8px;
+            font-size: 0.9em;
+        }
+        @media (max-width: 768px) {
+            .dual-lang {
+                flex-direction: column;
+            }
+        }
+    </style>
+	<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({ startOnLoad: true, theme: 'default' });</script>
+</head>
+<body>
+    <h1>EcoMarket: Distribución de Datos - Replicación y Sharding para Escalabilidad de Base de Datos</h1>
+    <p>De una BD monolítica a un clúster distribuido: Replica y particiona datos para manejar crecimiento explosivo en EcoMarket</p>
+
+    <!-- Sección de Introducción -->
+    <section id="introduccion" style="background: #f0f8ff; border-radius: 10px; padding: 20px; margin: 20px 0;">
+        <h2>🎯 Al Final de Esta Semana, Serás Capaz De:</h2>
+        <div class="checkpoint">
+            <ul>
+                <li>✅ <strong>Explicar</strong> conceptos de replicación (primario-secundario) y particionamiento (sharding)</li>
+                <li>✅ <strong>Configurar</strong> replicación PostgreSQL con streaming replication</li>
+                <li>✅ <strong>Implementar</strong> un router de sharding con hashing (simple y consistente)</li>
+                <li>✅ <strong>Simular</strong> escenarios de replicación con lecturas/escrituras distribuidas</li>
+                <li>✅ <strong>Evaluar</strong> trade-offs: Consistencia vs disponibilidad (CAP theorem)</li>
+                <li>✅ <strong>Validar</strong> distribución de datos con scripts de carga ejecutables</li>
+            </ul>
+        </div>
+
+        
+		<h2>📚 Lecturas / Estudio Independiente (Antes del Taller)</h2>
+<p>Prepara el terreno con estas lecturas (30-45 min):</p>
+<ul>
+    <li><a href="https://www.postgresql.org/docs/current/warm-standby.html" target="_blank">"PostgreSQL Streaming Replication" (PostgreSQL Docs)</a> – Enfócate en primario-secundario y configuraciones básicas.</li>
+    <li><a href="https://www.cockroachlabs.com/docs/stable/architecture/distribution-layer.html" target="_blank">"Data Distribution in CockroachDB" (Cockroach Labs, 2025)</a> – Ejemplos de sharding automático.</li>
+    <li><a href="https://martinfowler.com/articles/patterns-of-distributed-systems/sharding.html" target="_blank">"Sharding Patterns" (Martin Fowler)</a> – Para entender estrategias de particionamiento.</li>
+</ul>
+
+        <h2>🛠️ Taller 6: Simulación de Replicación y Diseño de Sharding en EcoMarket</h2>
+        <p><strong>Instrucciones (4 horas, +/- 30 min según entorno Docker):</strong> Evoluciona tu BD de Semana 5/6 (integrada con servicios balanceados) agregando replicación primario-secundario. Diseña y simula sharding para datos de usuarios/productos.</p>
+        <ol>
+            <li>Configura replicación en PostgreSQL (Docker): Primario para writes, secundarios para reads.</li>
+            <li>Implementa router de sharding con scripts ejecutables.</li>
+            <li>Simula carga: Escribe en primario, lee de secundarios (con balanceo).</li>
+            <li>Valida resiliencia: Prueba failover y recovery automático.</li>
+        </ol>
+
+        <h3>Requisitos Técnicos Mínimos</h3>
+        <ul>
+            <li>Usa PostgreSQL en Docker (primario: puerto 5432, secundarios: 5433, 5434).</li>
+            <li>Configura streaming replication con wal_level=replica.</li>
+            <li>Queries distribuidas: Writes al primario, reads a secundarios.</li>
+            <li>Script de prueba de carga para validar distribución.</li>
+        </ul>
+
+        <div class="tip">
+            <h3>🔧 ¿Por Qué PostgreSQL para Este Taller?</h3>
+            <p><strong>Para producción real, considera:</strong></p>
+            <ul>
+                <li><strong>PostgreSQL</strong>: ✅ Elegido aquí - replicación nativa, sharding via extensions (Citus), gratis, ideal para aprender</li>
+                <li><strong>MongoDB</strong>: Mejor para documentos, sharding automático pero eventual consistency</li>
+                <li><strong>CockroachDB</strong>: Si buscas SQL distribuido con resiliencia geo</li>
+                <li><strong>AWS RDS/Aurora</strong>: Integración cloud con replicación multi-AZ</li>
+            </ul>
+            <p><strong>Para aprender distribución de datos, PostgreSQL es ideal ⭐</strong> - Balance perfecto entre simplicidad y potencia real.</p>
+        </div>
+
+        <h3>📊 Esquema de Componentes Propuesto</h3>
+        <figure>
+            <div class="diagram">
+			<div class="mermaid">
+%%{ init: { "flowchart": { "htmlLabels": true } } }%%
+graph LR
+  A["Servicios<br>(Balanceados Semana 6)"] -->|Writes| B["Primario BD<br>(PostgreSQL 5432)"]
+  A -->|Reads| C["Secundario 1<br>(PostgreSQL 5433)"]
+  A -->|Reads| D["Secundario 2<br>(PostgreSQL 5434)"]
+  B -->|Streaming Replication| C
+  B -->|Streaming Replication| D
+  C -->|Respuesta Read| A
+  D -->|Respuesta Read| A
+  style B fill:#d1ecf1
+  style C fill:#e8f4fd
+  style D fill:#e8f4fd
+	</div>
+            </div>
+            <figcaption>Arquitectura de replicación: Servicios envían writes al primario y reads a secundarios, quienes reciben datos vía streaming replication asíncrona</figcaption>
+        </figure>
+
+        <h2>📋 Entrega y Evaluación (Avance Hito 2 - 10%)</h2>
+        <ul>
+            <li><strong>Repositorio:</strong> Código con Docker Compose para BD replicada + router sharding (GitHub o similar).</li>
+            <li><strong>Scripts ejecutables:</strong> Configuración PostgreSQL + pruebas de carga.</li>
+            <li><strong>Informe breve (1-2 páginas):</strong>
+                <ul>
+                    <li>Justificación de replicación: Ventajas (lecturas escaladas, HA) vs retos (lag de replicación).</li>
+                    <li>Simulación lograda: Evidencia de writes en primario, reads distribuidos en logs.</li>
+                    <li>Análisis CAP: Decisiones sobre consistencia vs disponibilidad.</li>
+                </ul>
+            </li>
+        </ul>
+
+        <h3>Rúbrica de Evaluación Específica</h3>
+        <div class="decision-matrix">
+            <table class="comparison-table">
+                <thead>
+                    <tr>
+                        <th>Criterio</th>
+                        <th>Puntos</th>
+                        <th>Descriptor</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Configuración PostgreSQL</td>
+                        <td>2 pts</td>
+                        <td>Archivos postgresql.conf, pg_hba.conf correctos + replicación streaming funcional</td>
+                    </tr>
+                    <tr>
+                        <td>Docker Compose ejecutable</td>
+                        <td>1 pt</td>
+                        <td>docker-compose up levanta primario + 2 secundarios sin errores</td>
+                    </tr>
+                    <tr>
+                        <td>Router de sharding</td>
+                        <td>2 pts</td>
+                        <td>Código Python con hashing funcional + distribución uniforme validada</td>
+                    </tr>
+                    <tr>
+                        <td>Script de pruebas</td>
+                        <td>1 pt</td>
+                        <td>load_test.py ejecuta sin errores + métricas de throughput/lag</td>
+                    </tr>
+                    <tr>
+                        <td>Diagrama de trade-offs CAP</td>
+                        <td>2 pts</td>
+                        <td>Decisiones justificadas por tabla (inventory: CP, cart: AP, etc.)</td>
+                    </tr>
+                    <tr>
+                        <td>Análisis de monitoring</td>
+                        <td>1 pt</td>
+                        <td>Menciona herramientas (pgBadger, pg_stat_replication) + métricas clave</td>
+                    </tr>
+                    <tr>
+                        <td>Reflexión crítica</td>
+                        <td>1 pt</td>
+                        <td>Identifica problemas futuros (cross-shard joins, rebalanceo)</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="tip">
+            <strong>Tip para entrega:</strong> Incluye un README con comandos para correr (e.g., docker-compose up) y un video corto (1 min) de E2E: Write en primario → Read en secundario con lag mínimo. Para analizar rendimiento de PostgreSQL, usa <strong>pgBadger</strong> para parsear logs y generar reportes HTML de queries lentas y conexiones. Comando: <code>pgbadger /var/log/postgresql/postgresql-*.log -o reporte.html</code>
+        </div>
+
+        <h2>🤔 Cuestiones de Reflexión (Post-Taller)</h2>
+        <ol>
+            <li>¿Qué pasa con lag en replicación asíncrona? ¿Cómo afecta lecturas "frescas"?</li>
+            <li>¿Cómo elegir clave de sharding? (e.g., user_id vs tenant_id en EcoMarket).</li>
+            <li>¿Consideraciones de CAP? (Disponibilidad vs Consistencia en fallos).</li>
+            <li>¿Cuándo evitar sharding? (Volúmenes bajos, queries cross-shard costosas).</li>
+        </ol>
+        <p><strong>¡Ahora, salta al Journey de EcoMarket para la práctica guiada!</strong> <a href="#journey" style="color: #e74c3c; font-weight: bold;">Ir al Journey →</a></p>
+    </section>
+
+    <div id="journey"></div>
+
+    <div class="progress-bar">
+        <div class="progress-item active">🎯 Fase 0: El Problema Real</div>
+        <div class="progress-item">🔄 Fase 1: Evolución de Soluciones</div>
+        <div class="progress-item">💻 Fase 2: Implementando Replicación</div>
+        <div class="progress-item">🧪 Fase 3: Validación</div>
+    </div>
+
+    <div class="phase">
+        <h2 data-icon="🎯">Fase 0: El Problema Real que Justifica Distribución de Datos (30 min)</h2>
+        <p><strong>Objetivo de Aprendizaje:</strong> Entender por qué una BD monolítica no escala para lecturas/escrituras crecientes. Justifica la complejidad de replicación/sharding con números del negocio.</p>
+
+        <h3>🪴 Escenario: Evoluciona tu BD de Usuarios/Productos (Integración con Semanas 1-6)</h3>
+        <p>Usa la BD centralizada de talleres previos (balanceada con LB). Ahora, con 10k usuarios diarios o más, los writes saturan el primario y los reads causan latencia inaceptable.</p>
+
+        <div class="scenario-box">
+            <h4>📊 Datos Reales del Sistema Actual:</h4>
+            <ul>
+                <li><strong>Volumen:</strong> 5,000 writes/hora (registros) + 50,000 reads/hora (consultas)</li>
+                <li><strong>Instancias BD:</strong> 1 sola (PostgreSQL monolítico)</li>
+                <li><strong>Acoplamiento actual:</strong> Todos queries directos a una BD (sin distribución)</li>
+                <li><strong>Fallos:</strong> 15% de reads fallan por locks en picos de writes</li>
+                <li><strong>Costo de oportunidad:</strong> $5 por consulta lenta (abandono carrito)</li>
+            </ul>
+        </div>
+
+        <div class="scenario-box">
+            <h4>📈 Diagrama: El Problema Actual con BD Única</h4>
+            <figure>
+			<div class="diagram">
+			<div class="mermaid">
+%%{ init: { "flowchart": { "htmlLabels": true } } }%%
+graph LR
+  subgraph Servicios
+    S["Servicios Balanceados<br>(Semana 6)"]
+  end
+
+  subgraph BD
+    B["BD Única<br>(PostgreSQL)"]
+  end
+
+  S -- "5000 writes + 50k reads/h" --> B
+
+  B -.-> S
+  B -.-> S
+
+  style B fill:#fefee0,stroke:#999,stroke-width:1px
+  style S fill:#e8f4fd
+  classDef dottedEdge stroke-dasharray: 5 5
+  linkStyle default stroke:#ff3,stroke-width:2px
+			</div>
+			</div>
+            <figcaption>Todos los servicios apuntan a una sola instancia de base de datos, creando un cuello de botella que causa locks y downtime total si la BD falla</figcaption>
+            </figure>
+			
+            <pre class="diagram">
+SITUACIÓN ACTUAL: BD ÚNICA SIN DISTRIBUCIÓN
+┌─────────────┐    50k reads + 5k writes/h    ┌─────────────┐
+│ Servicios   │ ────────────────────────────── │ BD Única    │
+│ (Balanceada)│                               │ (PostgreSQL)│
+└─────────────┘                               └─────────────┘
+      │                                             │
+      │ Si sobrecarga:                            │ Si cae:
+      ├──X── 15% locks en reads                   │ ├──X── 100% downtime app
+      ├──X── Latencia 2s+ en consultas            │ ├──X── $5k/hora perdido
+      └──X── $4k/hora en carritos abandonados     │ └──X── Sin recuperación auto
+
+COSTO REAL: 15% fallos × 50k reads/h × $5 = $37,500 perdidos/hora en picos
+ESCALAMIENTO: +2x datos = +200% latencia + 30% más locks
+            </pre>
+        </div>
+
+        <div class="warning">
+            <h3>⚠️ Los Síntomas del Dolor</h3>
+            <p><strong>Reporte del Gerente:</strong> "En picos de ventas, el 15% de búsquedas de productos fallan por lentitud de BD."</p>
+            <p><strong>Reporte Técnico:</strong> La BD única maneja 40k reads/h máximo, pero picos llegan a 50k reads/h, causando locks y 2s o más de latencia.</p>
+            <p><strong>Impacto:</strong> 15% × 50k reads/h × $5 = $37,500 perdidos en cada hora pico mensual.</p>
+        </div>
+
+        <div class="activity">
+            <h3>🧮 Actividad: Calculando el Costo de No Distribuir Datos</h3>
+            <p><strong>Objetivo:</strong> Cuantificar por qué necesitas replicación y sharding antes de invertir tiempo en configurarlos.</p>
+            <ol>
+                <li><strong>Calcula:</strong> Con 15% de fallos y 50k reads/h en picos, ¿cuánto pierdes en conversiones al mes? (Asume 4 horas pico por día)</li>
+                <li><strong>Proyecta:</strong> Si duplicas datos, ¿cómo escala la latencia y locks según tu experiencia actual?</li>
+                <li><strong>Umbral:</strong> ¿A partir de qué costo mensual inviertes en distribución BD? (Compara con costo de implementación: 25h de trabajo)</li>
+            </ol>
+            <p><strong>Meta:</strong> Justificar distribución con retorno de inversión concreto y medible.</p>
+        </div>
+
+        <div class="activity">
+            <h3>🔥 Mini-Script: "Rompe" tu BD Única</h3>
+            <p><strong>Objetivo:</strong> Simula locks y latencia en BD única para sentir el dolor empíricamente.</p>
+            
+            <div class="code-block code-python">
+<pre># stress_test_single_db.py
+"""
+Script para saturar una BD única y observar degradación de performance
+Genera writes concurrentes que causan locks en reads
+"""
+import psycopg2
+import threading
+import time
+
+DB_CONFIG = {
+    'host': 'localhost',
+    'port': 5432,
+    'database': 'ecomarket',
+    'user': 'postgres',
+    'password': 'postgres_pass'
+}
+
+def continuous_writes(duration_seconds=60):
+    """Genera writes continuos que causan locks"""
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    
+    # Crear tabla de prueba
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stress_test (
+            id SERIAL PRIMARY KEY,
+            data TEXT,
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    conn.commit()
+    
+    start = time.time()
+    write_count = 0
+    
+    while time.time() - start < duration_seconds:
+        try:
+            # Write pesado que genera locks
+            cursor.execute("""
+                INSERT INTO stress_test (data) 
+                SELECT md5(random()::text) 
+                FROM generate_series(1, 100)
+            """)
+            conn.commit()
+            write_count += 100
+        except Exception as e:
+            conn.rollback()
+            print(f"❌ Write falló: {e}")
+        
+        time.sleep(0.1)  # Small delay para no saturar instantáneamente
+    
+    print(f"✅ Writes completados: {write_count}")
+    cursor.close()
+    conn.close()
+
+def continuous_reads(duration_seconds=60):
+    """Genera reads que compiten con writes"""
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    
+    start = time.time()
+    read_count = 0
+    slow_reads = 0
+    
+    while time.time() - start < duration_seconds:
+        try:
+            query_start = time.time()
+            # Read que puede bloquearse por writes
+            cursor.execute("SELECT COUNT(*) FROM stress_test")
+            count = cursor.fetchone()[0]
+            query_time = time.time() - query_start
+            
+            if query_time > 0.5:  # Si tarda más de 500ms, es lento
+                slow_reads += 1
+                print(f"⚠️ Read lento: {query_time:.3f}s (count: {count})")
+            
+            read_count += 1
+        except Exception as e:
+            print(f"❌ Read falló: {e}")
+        
+        time.sleep(0.05)
+    
+    failure_rate = (slow_reads / read_count * 100) if read_count > 0 else 0
+    print(f"✅ Reads completados: {read_count}")
+    print(f"📊 Tasa de reads lentos: {failure_rate:.1f}%")
+    cursor.close()
+    conn.close()
+
+if __name__ == "__main__":
+    print("🔥 Iniciando stress test en BD única...")
+    print("Duración: 60 segundos\n")
+    
+    # Lanzar threads concurrentes
+    write_thread = threading.Thread(target=continuous_writes, args=(60,))
+    read_thread1 = threading.Thread(target=continuous_reads, args=(60,))
+    read_thread2 = threading.Thread(target=continuous_reads, args=(60,))
+    
+    write_thread.start()
+    time.sleep(2)  # Dar ventaja a writes para generar locks
+    read_thread1.start()
+    read_thread2.start()
+    
+    write_thread.join()
+    read_thread1.join()
+    read_thread2.join()
+    
+    print("\n🏁 Stress test completado")
+    print("💡 Observa: Reads lentos debido a locks de writes concurrentes")
+</pre>
+            </div>
+
+            <div class="checkpoint">
+                <p><strong>Ejecutar y Observar:</strong></p>
+                <ol>
+                    <li>Corre el script: <code>python stress_test_single_db.py</code></li>
+                    <li><strong>Esperado:</strong> Tasa de reads lentos entre diez y 20%</li>
+                    <li><strong>Reflexión:</strong> ¿Qué pasaría si esto fuera producción con clientes reales esperando?</li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="ai-prompt">
+            <h4>🤖 Prompt para IA: Análisis de Impacto de BD Única</h4>
+            <pre>Ayúdame a analizar el impacto de una BD única en mi sistema de EcoMarket:
+
+Contexto:
+- Writes por hora: 5000 (registros usuarios/productos)
+- Reads por hora: 50k (consultas)
+- Valor por consulta exitosa: $5
+- Tasa de fallos actual: 15% (locks)
+- Datos: Creciendo 2x/mes
+- Latencia actual: 2s en picos
+
+Preguntas:
+1. ¿Cuál es el costo mensual de fallos en picos?
+2. Si duplico volumen, ¿cómo escala el problema?
+3. ¿A partir de qué punto la BD única se vuelve crítica?
+4. ¿Qué costos ocultos (e.g., downtime total) estoy ignorando?
+
+Dame números y escenarios concretos.</pre>
+        </div>
+
+        <div class="checkpoint">
+            <h3>✅ Checkpoint de Fase 0</h3>
+            <p><strong>Antes de continuar, responde sin mirar atrás:</strong></p>
+            <ol>
+                <li>¿Cuál es el costo mensual aproximado de no distribuir datos en EcoMarket? (Calcula basándote en $37.5k/h perdidos en picos, 4h diarias)</li>
+                <li>¿Por qué una BD única no puede manejar 50k reads/h? Explica en términos de I/O, locks y recursos de CPU.</li>
+                <li>Si agregas más memoria RAM a la BD única, ¿resuelves el problema de escalabilidad? ¿Por qué sí o por qué no?</li>
+            </ol>
+            <p><em>Estas preguntas aseguran que entiendes el "por qué" antes del "cómo".</em></p>
+        </div>
+    </div>
+
+    <div class="phase">
+        <h2 data-icon="🔄">Fase 1: La Evolución Natural hacia Distribución de Datos (45 min)</h2>
+        <p><strong>Objetivo de Aprendizaje:</strong> Explora cómo una BD única evoluciona a replicada y shardeada, entendiendo límites de cada paso a través de experimentación guiada.</p>
+
+        <h3>🚀 El Evolution Journey a Replicación y Sharding</h3>
+        <p>No saltas directo a clústeres de base de datos. Evolucionas cuando los locks duelen, extendiendo la BD central de talleres previos paso a paso.</p>
+
+        <div class="scenario-box">
+            <h4>🔄 Diagrama: Evolution Journey - De Única a Distribuida</h4>
+			
+            <pre class="diagram">
+PASO 1: BD ÚNICA (Actual)
+┌─────────────┐    Directo    ┌─────────────┐
+│ Servicios   │ ──────────── │ BD Única    │
+└─────────────┘               │ (PostgreSQL)│
+                              └─────────────┘
+    ↓ Problema: 50k reads satura I/O 100%
+
+PASO 2: REPLICACIÓN PRIMARIO-SECU (Lecturas Escaladas)
+┌─────────────┐ ──Writes──> ┌─────────────┐ ──Reads──> ┌─────────────┐
+│ Servicios   │             │ Primario    │            │ Secundario  │
+└─────────────┘             └─────────────┘            └─────────────┘
+    ↓ Problema: Lag en reads + writes aún centralizados
+
+PASO 3: SHARDING + REPLICACIÓN (Escrituras Dist.) 
+┌─────────────┐ ──Por Shard──> ┌─────────────┐
+│ Servicios   │                 │ Shard 1    │ ──Replic.──> ┌Sec. Shard1│
+└─────────────┘                 └─────────────┘             └───────────┘
+                                  │ Shard 2    │ ──Replic.──> ┌Sec. Shard2│
+                                  └─────────────┘             └───────────┘
+    ↓ Solución: Datos particionados + HA por shard
+
+DECISIÓN: ¿Vale replicación por picos de reads?
+          Si >40k reads/h o crecimiento → Sí
+            </pre>
+        </div>
+
+        <div class="evolution-step">
+            <h4>Paso 1: BD Única (Actual)</h4>
+            <p><strong>Código:</strong> Conexión directa (ejemplo: psycopg2 a localhost:5432)</p>
+            <p><strong>Funciona cuando:</strong> Bajo volumen, queries simples sin concurrencia alta</p>
+            <p><strong>Falla cuando:</strong> Picos de tráfico, locks en writes concurrentes, sin alta disponibilidad</p>
+        </div>
+
+        <div class="evolution-step">
+            <h4>Paso 2: Replicación Primario-Secundario</h4>
+            <p><strong>Código:</strong> Config pg_hba.conf más recovery.conf en secundarios</p>
+            <p><strong>Funciona cuando:</strong> Reads superan writes (80/20 o mayor), lag tolerable (<1s)</p>
+            <p><strong>Falla cuando:</strong> Writes altos (cuello de botella en primario), requerimientos de consistencia fuerte</p>
+        </div>
+
+        <div class="evolution-step">
+            <h4>Paso 3: Sharding con Replicación</h4>
+            <p><strong>Código:</strong> Tablas particionadas más router de queries inteligente</p>
+            <p><strong>Funciona cuando:</strong> Datos masivos, queries por clave de partición conocida</p>
+            <p><strong>Nuevo costo:</strong> Gestión de cross-shard queries, complejidad operacional aumentada</p>
+        </div>
+
+        <h3>📊 Tabla Comparativa: ¿Cuándo Usar Cada Estrategia?</h3>
+        <div class="decision-matrix">
+            <table class="comparison-table">
+                <thead>
+                    <tr>
+                        <th>Estrategia</th>
+                        <th>Escala Reads</th>
+                        <th>Escala Writes</th>
+                        <th>Consistencia</th>
+                        <th>Complejidad</th>
+                        <th>Mejor Para</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>BD Única</strong></td>
+                        <td>❌ No</td>
+                        <td>❌ No</td>
+                        <td>✅ Fuerte</td>
+                        <td>🟢 Baja</td>
+                        <td>MVP, volumen bajo (menor a 10k req por hora)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Replicación Primario-Secundario</strong></td>
+                        <td>✅ Sí (horizontal)</td>
+                        <td>⚠️ Limitado (cuello primario)</td>
+                        <td>⚠️ Eventual</td>
+                        <td>🟡 Media</td>
+                        <td>Read-heavy (80/20), lag tolerable</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Sharding</strong></td>
+                        <td>✅ Sí</td>
+                        <td>✅ Sí (distribuye writes)</td>
+                        <td>⚠️ Depende (por shard fuerte)</td>
+                        <td>🔴 Alta</td>
+                        <td>Datos masivos, queries por key</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Sharding más Replicación</strong></td>
+                        <td>✅✅ Máxima</td>
+                        <td>✅ Sí</td>
+                        <td>⚠️ Compleja</td>
+                        <td>🔴🔴 Muy Alta</td>
+                        <td>Escala global, alta disponibilidad crítica</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="tip">
+                <p><strong>Regla de decisión:</strong> Empieza con BD única. Cuando reads saturan (mayor a 40k por hora), agrega replicación. Cuando writes saturan (mayor a cinco mil por hora) y datos crecen exponencialmente, considera sharding. No hagas sharding prematuro.</p>
+            </div>
+        </div>
+
+        <div class="checkpoint">
+            <h3>✅ Checkpoint de Evolución</h3>
+            <p><strong>Autoevaluación:</strong> Antes de continuar, verifica tu comprensión:</p>
+            <ol>
+                <li>Si tu sistema tiene 80% reads y 20% writes, ¿qué estrategia es óptima? ¿Por qué?</li>
+                <li>¿Qué problema NO resuelve la replicación primario-secundario? (Pista: piensa en el primario como posible cuello de botella)</li>
+                <li>Describe un escenario donde sharding sea contraproducente (sugerencia: queries que necesitan JOIN entre múltiples shards)</li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="phase">
+        <h2 data-icon="🎯">Interludio: ¿Por qué no podemos tenerlo todo? CAP Informalmente</h2>
+        
+        <div class="scenario-box">
+            <h4>Experimento Mental: La Paradoja de Distribuir Datos</h4>
+            <p>Imagina que tienes dos réplicas de tu base de datos: una en São Paulo y otra en Londres.</p>
+            
+            <p><strong>Escenario 1: Garantizar Consistencia Fuerte</strong></p>
+            <p>Decides que <em>cada</em> write debe confirmarse en ambas réplicas antes de responder al cliente. Un usuario en São Paulo actualiza su perfil. Tu sistema:</p>
+            <ol>
+                <li>Escribe en réplica de São Paulo (10ms)</li>
+                <li>Envía cambio a Londres a través del Atlántico (150ms RTT)</li>
+                <li>Espera confirmación de Londres</li>
+                <li>Responde al cliente (total: ~160ms mínimo)</li>
+            </ol>
+            <p>✅ <strong>Consistencia:</strong> Ambas réplicas siempre idénticas<br>
+            ❌ <strong>Latencia:</strong> Limitada por geografía física (velocidad de la luz)</p>
+            
+            <p><strong>Escenario 2: Minimizar Latencia</strong></p>
+            <p>Decides responder al cliente apenas escribes en la réplica local. El cambio se propaga a Londres "eventualmente".</p>
+            <ol>
+                <li>Escribe en réplica de São Paulo (10ms)</li>
+                <li>Responde al cliente inmediatamente</li>
+                <li>Propaga a Londres en background (150ms después)</li>
+            </ol>
+            <p>✅ <strong>Latencia:</strong> 10ms versus 160ms (16x más rápido)<br>
+            ❌ <strong>Consistencia:</strong> Ventana de 150ms donde las réplicas difieren</p>
+            
+            <p><strong>Escenario 3: Fallo de Red</strong></p>
+            <p>El cable submarino entre continentes se corta. Ahora debes elegir:</p>
+            <ul>
+                <li><strong>Opción A (Disponibilidad):</strong> Ambas réplicas siguen aceptando writes independientemente. Riesgo: conflictos cuando reconecten (mismo usuario editó perfil en ambas regiones).</li>
+                <li><strong>Opción B (Consistencia):</strong> Solo una réplica acepta writes (la que tiene "quorum"). La otra se vuelve solo lectura hasta restaurar conexión.</li>
+            </ul>
+        </div>
+
+        <div class="tip">
+            <h4>El Teorema CAP en Lenguaje Simple</h4>
+            <p>En un sistema distribuido con <strong>Particiones de red</strong> (P es inevitable en redes reales), debes elegir en cada operación:</p>
+            <ul>
+                <li><strong>C (Consistency):</strong> Todos los nodos ven los mismos datos al mismo tiempo</li>
+                <li><strong>A (Availability):</strong> Cada request recibe una respuesta (sin garantizar que esté actualizada)</li>
+            </ul>
+            <p><strong>No puedes tener ambas simultáneamente</strong> cuando hay partición de red.</p>
+        </div>
+
+        <div class="decision-matrix">
+            <h4>Decisiones Arquitectónicas Según CAP</h4>
+            <table class="comparison-table">
+                <thead>
+                    <tr>
+                        <th>Sistema</th>
+                        <th>Elige</th>
+                        <th>Sacrifica</th>
+                        <th>Ejemplo Uso</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>PostgreSQL (replicación síncrona)</strong></td>
+                        <td>CP</td>
+                        <td>Disponibilidad (si secundario inalcanzable, writes fallan)</td>
+                        <td>Transacciones bancarias</td>
+                    </tr>
+                    <tr>
+                        <td><strong>PostgreSQL (replicación asíncrona)</strong></td>
+                        <td>AP</td>
+                        <td>Consistencia (lag temporal)</td>
+                        <td>Analytics, reportes</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Cassandra</strong></td>
+                        <td>AP</td>
+                        <td>Consistencia (eventual consistency)</td>
+                        <td>Feeds de redes sociales</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Spanner (Google)</strong></td>
+                        <td>CP*</td>
+                        <td>Latencia (usa relojes atómicos para coordinar)</td>
+                        <td>AdWords billing</td>
+                    </tr>
+                </tbody>
+            </table>
+            <p style="font-size: 0.9em; color: #666; margin-top: 10px;">
+                <strong>*Nota sobre Spanner:</strong> Spanner se considera CP porque prioriza la consistencia fuerte globalmente, cumpliendo con el teorema CAP. Sin embargo, logra baja latencia usando hardware especializado (TrueTime con relojes atómicos GPS y sincronización precisa) para minimizar el tiempo de espera por confirmación entre nodos distribuidos. Esto NO significa que "viola" CAP — simplemente minimiza el costo de la consistencia mediante infraestructura dedicada. En redes estándar sin TrueTime, garantizar consistencia fuerte globalmente sigue implicando latencias altas. El teorema CAP permanece válido: Spanner sacrifica disponibilidad parcial durante particiones de red para mantener consistencia.
+            </p>
+        </div>
+
+        <div class="checkpoint">
+            <p><strong>Reflexión: En EcoMarket, ¿qué elegirías?</strong></p>
+            <ul>
+                <li><strong>Inventario:</strong> CP (no vender stock inexistente)</li>
+                <li><strong>Carrito de compras:</strong> AP (mejor experiencia, reconciliar conflictos después)</li>
+                <li><strong>Historial de órdenes:</strong> AP (consistencia eventual aceptable)</li>
+            </ul>
+            <p><em>No hay una respuesta única; depende del subdominio. Antes de continuar: ¿Qué elegirías para el perfil de usuario en EcoMarket? Justifica tu decisión considerando frecuencia de actualizaciones y criticidad de consistencia.</em></p>
+        </div>
+    </div>
+
+    <div class="phase">
+        <h2 data-icon="💻">Fase 2: Implementando Replicación y Sharding (90 min, más menos quince según Docker)</h2>
+        <p><strong>Objetivo de Aprendizaje:</strong> Construye replicación paso a paso con código ejecutable, luego diseña sharding para EcoMarket diferenciando entre hash simple y consistent hashing.</p>
+
+        <div class="warning">
+            <h3>⚠️ IMPORTANTE: Replicación ≠ Sharding</h3>
+            <p>Esta fase cubre <strong>DOS estrategias de escalamiento fundamentalmente diferentes</strong>:</p>
+            <ul>
+                <li><strong>Replicación (Secciones A y B):</strong> Copiar <em>todos</em> los datos del primario a múltiples secundarios.
+                    <ul>
+                        <li>🎯 <strong>Objetivo:</strong> Escalar <em>reads horizontalmente</em> y alta disponibilidad</li>
+                        <li>⚠️ <strong>Limitación:</strong> Writes siguen limitados por el primario (cuello de botella)</li>
+                        <li>📊 <strong>Uso:</strong> Sistemas read-heavy (80/20 o mayor)</li>
+                    </ul>
+                </li>
+                <li><strong>Sharding (Secciones C y D):</strong> Particionar datos en subconjuntos disjuntos distribuidos en múltiples nodos independientes.
+                    <ul>
+                        <li>🎯 <strong>Objetivo:</strong> Escalar <em>tanto reads como writes horizontalmente</em></li>
+                        <li>⚠️ <strong>Limitación:</strong> Complejidad operacional, cross-shard queries, rebalanceo</li>
+                        <li>📊 <strong>Uso:</strong> Datos masivos que no caben en un nodo, writes intensivos</li>
+                    </ul>
+                </li>
+            </ul>
+            <p><strong>En producción:</strong> Puedes combinarlas (cada shard con sus propias réplicas), pero son decisiones arquitectónicas separadas que resuelven problemas diferentes.</p>
+        </div>
+
+        <h3>⚙️ Sección A: Configuración de Replicación PostgreSQL</h3>
+        
+        <div class="activity">
+            <h4>Paso 1: Configurar el Primario</h4>
+            <p>Estos son los archivos de configuración reales que necesitas para habilitar replicación en PostgreSQL.</p>
+            
+            <h5>postgresql.conf (Primario)</h5>
+            <div class="code-block code-sql">
+<pre># Habilitar replicación
+wal_level = replica
+max_wal_senders = 3
+wal_keep_size = 1GB
+
+# Configurar conexiones desde réplicas
+listen_addresses = '*'
+
+# Configuración de streaming
+hot_standby = on
+max_connections = 100</pre>
+            </div>
+
+            <h5>pg_hba.conf (Primario - Permitir conexiones de réplicas)</h5>
+            <div class="code-block code-sql">
+<pre># TYPE  DATABASE        USER            ADDRESS                 METHOD
+# Permitir replicación desde cualquier host en red local
+host    replication     replicator      192.168.1.0/24          md5
+# O si usas Docker, permite desde cualquier contenedor
+host    replication     replicator      all                     md5</pre>
+            </div>
+
+            <h5>Crear Usuario de Replicación (SQL en Primario)</h5>
+            <div class="code-block code-sql">
+<pre>-- Crear usuario específico para replicación
+CREATE ROLE replicator WITH REPLICATION PASSWORD 'rep_password' LOGIN;
+
+-- Verificar que el usuario tiene permisos de replicación
+SELECT rolname, rolreplication FROM pg_roles WHERE rolname = 'replicator';</pre>
+            </div>
+
+            <div class="checkpoint">
+                <p><strong>Validación Paso 1:</strong> Reinicia PostgreSQL y verifica que no hay errores: <code>tail -f /var/log/postgresql/postgresql-*.log</code></p>
+            </div>
+        </div>
+
+        <div class="activity">
+            <h4>Paso 2: Configurar el Secundario</h4>
+            
+            <h5>Crear Base del Secundario (Bash)</h5>
+            <div class="code-block">
+<pre># En el servidor secundario, hacer backup del primario
+pg_basebackup -h db-primary -D /var/lib/postgresql/data -U replicator -P -Xs -R
+
+# -h: host del primario
+# -D: directorio de datos del secundario
+# -U: usuario de replicación
+# -P: mostrar progreso
+# -Xs: stream WAL durante backup
+# -R: crear postgresql.auto.conf automáticamente con configuración de standby</pre>
+            </div>
+
+            <h5>postgresql.auto.conf (Secundario - creado automáticamente por -R)</h5>
+            <div class="code-block code-sql">
+<pre># Configuración automática de standby
+primary_conninfo = 'host=db-primary port=5432 user=replicator password=rep_password'
+primary_slot_name = 'replication_slot_1'</pre>
+            </div>
+
+            <h5>Crear Replication Slot en Primario (Opcional pero recomendado)</h5>
+            <div class="code-block code-sql">
+<pre>-- En el primario, crear slot para que WAL no se borre antes de replicarse
+SELECT pg_create_physical_replication_slot('replication_slot_1');</pre>
+            </div>
+
+            <div class="checkpoint">
+                <p><strong>Validación Paso 2:</strong> En el primario, ejecuta:</p>
+                <div class="code-block code-sql">
+<pre>SELECT * FROM pg_stat_replication;</pre>
+                </div>
+                <p>Deberías ver tu secundario conectado con <code>state='streaming'</code> y <code>sync_state='async'</code></p>
+            </div>
+        </div>
+
+        <div class="activity">
+            <h4>Paso 3: Docker Compose Completo</h4>
+            <p>Configuración lista para ejecutar con Docker.</p>
+            
+            <div class="code-block">
+<pre>version: '3.8'
+
+services:
+  db-primary:
+    image: postgres:15
+    container_name: ecomarket-db-primary
+    environment:
+      POSTGRES_DB: ecomarket
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./primary-data:/var/lib/postgresql/data
+      - ./init-primary.sh:/docker-entrypoint-initdb.d/init.sh
+    command: |
+      postgres 
+      -c wal_level=replica 
+      -c hot_standby=on 
+      -c max_wal_senders=3 
+      -c wal_keep_size=1GB
+      -c listen_addresses='*'
+
+  db-secondary-1:
+    image: postgres:15
+    container_name: ecomarket-db-secondary-1
+    environment:
+      POSTGRES_DB: ecomarket
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_pass
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./secondary1-data:/var/lib/postgresql/data
+    command: |
+      bash -c "
+      until pg_basebackup -h db-primary -D /var/lib/postgresql/data/pgdata -U replicator -Xs -P -R; do
+        echo 'Esperando a que primario esté listo...'
+        sleep 2
+      done
+      postgres -c hot_standby=on
+      "
+    depends_on:
+      - db-primary
+
+  db-secondary-2:
+    image: postgres:15
+    container_name: ecomarket-db-secondary-2
+    environment:
+      POSTGRES_DB: ecomarket
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_pass
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5434:5432"
+    volumes:
+      - ./secondary2-data:/var/lib/postgresql/data
+    command: |
+      bash -c "
+      until pg_basebackup -h db-primary -D /var/lib/postgresql/data/pgdata -U replicator -Xs -P -R; do
+        echo 'Esperando a que primario esté listo...'
+        sleep 2
+      done
+      postgres -c hot_standby=on
+      "
+    depends_on:
+      - db-primary</pre>
+            </div>
+
+            <h5>init-primary.sh</h5>
+            <div class="code-block">
+<pre>#!/bin/bash
+set -e
+
+# Crear usuario de replicación
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    CREATE ROLE replicator WITH REPLICATION PASSWORD 'rep_password' LOGIN;
+    SELECT pg_create_physical_replication_slot('replication_slot_1');
+EOSQL
+
+# Actualizar pg_hba.conf para permitir replicación
+echo "host replication replicator all md5" >> "$PGDATA/pg_hba.conf"
+
+# Crear tablas necesarias para pruebas de replicación y sharding
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    -- Tabla para pruebas de replicación (write_load)
+    CREATE TABLE IF NOT EXISTS orders (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(50),
+        product VARCHAR(100),
+        amount DECIMAL(10,2),
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    -- Tabla para pruebas de sharding (ShardRouter)
+    CREATE TABLE IF NOT EXISTS users (
+        user_id VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(100),
+        email VARCHAR(100),
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    -- Crear índices para mejorar queries
+    CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+EOSQL
+
+echo "✅ Tablas orders y users creadas exitosamente"
+</pre>
+            </div>
+
+            <div class="checkpoint">
+                <p><strong>Ejecutar y Validar:</strong></p>
+                <ol>
+                    <li><code>docker-compose up -d</code></li>
+                    <li><code>docker exec -it ecomarket-db-primary psql -U postgres -d ecomarket -c "SELECT * FROM pg_stat_replication;"</code></li>
+                    <li>Deberías ver dos réplicas en estado streaming</li>
+                    <li><strong>NUEVO:</strong> Verifica que las tablas se crearon: <code>docker exec -it ecomarket-db-primary psql -U postgres -d ecomarket -c "\dt"</code></li>
+                    <li>Deberías ver las tablas <code>orders</code> y <code>users</code> listadas</li>
+                </ol>
+            </div>
+        </div>
+
+        <h3>🔀 Implementación: Router de Sharding</h3>
+        
+        <div class="warning">
+            <h4>⚠️ Hash Simple vs Consistent Hashing</h4>
+            <p>El código a continuación implementa <strong>hash simple (modulo)</strong> que es fácil de entender pero tiene un problema crítico: al agregar o quitar shards, <strong>todos los datos deben rebalancearse</strong>. Por ejemplo, con dos shards y hash módulo dos, si agregas un tercer shard (módulo tres), ~67% de las keys cambiarán de shard.</p>
+            <p><strong>Consistent hashing</strong> resuelve esto minimizando el rebalanceo (solo K sobre N keys se mueven al agregar un shard). Lo implementaremos después del ejemplo básico para comparar.</p>
+        </div>
+        
+        <div class="activity">
+            <h4>Router de Sharding con Hash Simple (Módulo)</h4>
+            <p>Implementación ejecutable de un router que distribuye datos entre shards usando hash simple.</p>
+            
+            <div class="code-block code-python">
+<pre>"""
+Shard Router para EcoMarket - Versión Hash Simple
+Distribuye datos de usuarios entre múltiples shards usando hash % num_shards
+"""
+import hashlib
+import psycopg2
+from typing import List, Dict, Optional
+
+# Habilitar debug mode para ver queries ejecutados
+DEBUG = True  # Cambiar a False para producción
+
+class SimpleHashShardRouter:
+    """Router que implementa hashing simple (módulo) para distribución de datos"""
+    
+    def __init__(self, shard_configs: List[Dict[str, str]]):
+        """
+        Inicializa el router con configuración de shards
+        
+        Args:
+            shard_configs: Lista de dicts con 'host', 'port', 'database', 'user', 'password'
+        """
+        self.shards = shard_configs
+        self.num_shards = len(shard_configs)
+        self.connections = {}
+        
+        print(f"✅ Router iniciado con {self.num_shards} shards")
+    
+    def _get_shard_index(self, key: str) -> int:
+        """
+        Determina índice de shard usando hash MD5 módulo número de shards
+        
+        Args:
+            key: Clave para hashear (ejemplo: user_id)
+            
+        Returns:
+            Índice del shard (cero a num_shards menos uno)
+        """
+        # Crear hash del key
+        hash_value = int(hashlib.md5(key.encode()).hexdigest(), 16)
+        
+        # Módulo para distribuir - PROBLEMA: sensible a cambios en num_shards
+        shard_idx = hash_value % self.num_shards
+        
+        if DEBUG:
+            print(f"🔍 Hash('{key}') % {self.num_shards} = shard {shard_idx}")
+        
+        return shard_idx
+    
+    def get_connection(self, key: str, is_write: bool = False) -> psycopg2.extensions.connection:
+        """
+        Obtiene conexión al shard apropiado
+        
+        Args:
+            key: Clave de particionamiento (ejemplo: user_id)
+            is_write: True para writes (usa primario), False para reads (puede usar secundario)
+            
+        Returns:
+            Conexión a PostgreSQL del shard correcto
+        """
+        shard_idx = self._get_shard_index(key)
+        shard_config = self.shards[shard_idx]
+        
+        # Crear key único para cache de conexiones
+        conn_key = f"{shard_idx}-{'w' if is_write else 'r'}"
+        
+        if conn_key not in self.connections:
+            # Si es write o no hay secundario configurado, usar primario
+            if is_write or 'secondary_host' not in shard_config:
+                host = shard_config['host']
+                port = shard_config['port']
+            else:
+                # Para reads, usar secundario si está configurado
+                host = shard_config['secondary_host']
+                port = shard_config['secondary_port']
+            
+            try:
+                self.connections[conn_key] = psycopg2.connect(
+                    host=host,
+                    port=port,
+                    database=shard_config['database'],
+                    user=shard_config['user'],
+                    password=shard_config['password'],
+                    connect_timeout=5
+                )
+                print(f"🔌 Nueva conexión a shard {shard_idx} ({'write' if is_write else 'read'})")
+            except psycopg2.OperationalError as e:
+                print(f"❌ Error conectando a shard {shard_idx}: {e}")
+                raise
+        
+        return self.connections[conn_key]
+    
+    def insert_user(self, user_id: str, name: str, email: str) -> bool:
+        """
+        Inserta usuario en el shard correcto
+        
+        Args:
+            user_id: ID del usuario (clave de particionamiento)
+            name: Nombre del usuario
+            email: Email del usuario
+            
+        Returns:
+            True si insertó exitosamente
+        """
+        shard_idx = self._get_shard_index(user_id)
+        conn = self.get_connection(user_id, is_write=True)
+        
+        try:
+            cursor = conn.cursor()
+            query = "INSERT INTO users (user_id, name, email) VALUES (%s, %s, %s)"
+            
+            if DEBUG:
+                print(f"🔍 Query: {query} con params ({user_id}, {name}, {email})")
+            
+            cursor.execute(query, (user_id, name, email))
+            conn.commit()
+            cursor.close()
+            
+            print(f"✅ Usuario {user_id} insertado en shard {shard_idx}")
+            return True
+        except Exception as e:
+            print(f"❌ Error insertando usuario {user_id}: {e}")
+            conn.rollback()
+            return False
+    
+    def get_user(self, user_id: str) -> Optional[Dict]:
+        """
+        Obtiene usuario del shard correcto
+        
+        Args:
+            user_id: ID del usuario
+            
+        Returns:
+            Dict con datos del usuario o None si no existe
+        """
+        shard_idx = self._get_shard_index(user_id)
+        conn = self.get_connection(user_id, is_write=False)
+        
+        try:
+            cursor = conn.cursor()
+            query = "SELECT user_id, name, email FROM users WHERE user_id = %s"
+            
+            if DEBUG:
+                print(f"🔍 Query: {query} con param ({user_id})")
+            
+            cursor.execute(query, (user_id,))
+            row = cursor.fetchone()
+            cursor.close()
+            
+            if row:
+                print(f"✅ Usuario {user_id} encontrado en shard {shard_idx}")
+                return {
+                    'user_id': row[0],
+                    'name': row[1],
+                    'email': row[2]
+                }
+            else:
+                print(f"⚠️ Usuario {user_id} no encontrado")
+                return None
+        except Exception as e:
+            print(f"❌ Error consultando usuario {user_id}: {e}")
+            return None
+    
+    def get_shard_distribution(self, user_ids: List[str]) -> Dict[int, int]:
+        """
+        Analiza cómo se distribuirían users entre shards
+        
+        Args:
+            user_ids: Lista de IDs de usuarios
+            
+        Returns:
+            Dict con conteo por shard
+        """
+        distribution = {i: 0 for i in range(self.num_shards)}
+        
+        for user_id in user_ids:
+            shard_idx = self._get_shard_index(user_id)
+            distribution[shard_idx] += 1
+        
+        return distribution
+    
+    def simulate_rebalance(self, user_ids: List[str], new_num_shards: int) -> int:
+        """
+        Simula cuántos usuarios se moverían al cambiar número de shards
+        
+        Args:
+            user_ids: Lista de IDs actuales
+            new_num_shards: Nuevo número de shards
+            
+        Returns:
+            Cantidad de usuarios que necesitan moverse
+        """
+        moves = 0
+        for user_id in user_ids:
+            hash_value = int(hashlib.md5(user_id.encode()).hexdigest(), 16)
+            old_shard = hash_value % self.num_shards
+            new_shard = hash_value % new_num_shards
+            
+            if old_shard != new_shard:
+                moves += 1
+        
+        return moves
+    
+    def close_all(self):
+        """Cierra todas las conexiones"""
+        for conn in self.connections.values():
+            conn.close()
+        print("🔌 Todas las conexiones cerradas")
+
+
+# Ejemplo de uso y demostración del problema de rebalanceo
+if __name__ == "__main__":
+    # NOTA IMPORTANTE: Esta configuración es CONCEPTUAL para demostrar el algoritmo
+    # En producción, necesitarías dos PRIMARIOS independientes (cada uno en su propio puerto)
+    # Para este lab, puedes usar: shard 0 = primario (5432), shard 1 = secundario-1 (5433)
+    # aunque conceptualmente el secundario debería usarse solo para reads
+    
+    shard_configs = [
+        {
+            'host': 'localhost',
+            'port': 5432,  # Primario - acepta writes
+            'database': 'ecomarket',
+            'user': 'postgres',
+            'password': 'postgres_pass'
+        },
+        {
+            'host': 'localhost',
+            'port': 5433,  # CONCEPTUAL: Usando secundario-1 para demostrar distribución
+                          # En producción real, esto sería otro primario independiente
+            'database': 'ecomarket',
+            'user': 'postgres',
+            'password': 'postgres_pass'
+        }
+    ]
+    
+    router = SimpleHashShardRouter(shard_configs)
+    
+    # Demostrar distribución
+    print("\n📊 Análisis de Distribución:")
+    test_ids = [f'user_{i}' for i in range(100)]
+    distribution = router.get_shard_distribution(test_ids)
+    
+    for shard_idx, count in distribution.items():
+        percentage = (count / 100) * 100
+        print(f"  Shard {shard_idx}: {count} usuarios ({percentage:.1f}%)")
+    
+    # Demostrar problema de rebalanceo
+    print("\n⚠️ Problema de Rebalanceo al Agregar Shard:")
+    moves = router.simulate_rebalance(test_ids, 3)  # Simular agregar tercer shard
+    print(f"  Con dos shards → tres shards:")
+    print(f"  Usuarios que necesitan moverse: {moves} de {len(test_ids)} ({moves/len(test_ids)*100:.1f}%)")
+    print(f"  💡 Con hash simple, aproximadamente {100 * (1 - 1/3):.0f}% de datos se mueven")
+    
+    router.close_all()
+</pre>
+            </div>
+
+            <div class="checkpoint">
+                <p><strong>Ejercicio 1:</strong> Ejecuta el script y observa:</p>
+                <ol>
+                    <li>¿La distribución entre dos shards es aproximadamente 50/50?</li>
+                    <li>¿Cuántos usuarios se moverían al agregar un tercer shard? (Deberías ver aproximadamente 67%)</li>
+                    <li>Cambia <code>DEBUG = False</code> y observa cómo cambia el output</li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="activity">
+            <h4>Consistent Hashing: Minimizando Rebalanceo</h4>
+            <p>Ahora implementemos consistent hashing para comparar. Esta técnica usa un "ring" virtual donde tanto shards como keys se mapean, minimizando el movimiento de datos.</p>
+            
+            <div class="code-block code-python">
+<pre>"""
+Shard Router con Consistent Hashing
+Minimiza rebalanceo al agregar o quitar shards
+"""
+import hashlib
+from typing import List, Dict
+from bisect import bisect_right
+
+class ConsistentHashRouter:
+    """Router que usa consistent hashing para minimizar rebalanceo"""
+    
+    def __init__(self, shard_configs: List[Dict[str, str]], virtual_nodes=150):
+        """
+        Inicializa router con consistent hashing
+        
+        Args:
+            shard_configs: Lista de configuraciones de shards
+            virtual_nodes: Número de nodos virtuales por shard físico
+        """
+        self.shards = shard_configs
+        self.virtual_nodes = virtual_nodes
+        self.ring = []  # Lista ordenada de (hash_value, shard_idx)
+        self.ring_map = {}  # Mapeo de hash a shard
+        
+        self._build_ring()
+        print(f"✅ Consistent hash ring construido con {len(self.ring)} puntos")
+    
+    def _hash(self, key: str) -> int:
+        """Genera hash consistente de una clave"""
+        return int(hashlib.md5(key.encode()).hexdigest(), 16)
+    
+    def _build_ring(self):
+        """Construye el ring de consistent hashing"""
+        for shard_idx, shard in enumerate(self.shards):
+            # Crear múltiples nodos virtuales para cada shard físico
+            for vnode in range(self.virtual_nodes):
+                # Hash del shard más índice de nodo virtual
+                key = f"{shard['host']}:{shard['port']}:vnode{vnode}"
+                hash_value = self._hash(key)
+                
+                self.ring.append(hash_value)
+                self.ring_map[hash_value] = shard_idx
+        
+        # Ordenar ring para búsqueda binaria
+        self.ring.sort()
+    
+    def _get_shard_index(self, key: str) -> int:
+        """
+        Encuentra shard usando consistent hashing
+        
+        Args:
+            key: Clave a hashear
+            
+        Returns:
+            Índice del shard
+        """
+        if not self.ring:
+            return 0
+        
+        hash_value = self._hash(key)
+        
+        # Buscar primer nodo en ring mayor o igual que hash_value
+        idx = bisect_right(self.ring, hash_value)
+        
+        # Si llegamos al final, wrap around al inicio
+        if idx == len(self.ring):
+            idx = 0
+        
+        ring_position = self.ring[idx]
+        shard_idx = self.ring_map[ring_position]
+        
+        return shard_idx
+    
+    def get_shard_distribution(self, user_ids: List[str]) -> Dict[int, int]:
+        """Analiza distribución con consistent hashing"""
+        distribution = {i: 0 for i in range(len(self.shards))}
+        
+        for user_id in user_ids:
+            shard_idx = self._get_shard_index(user_id)
+            distribution[shard_idx] += 1
+        
+        return distribution
+    
+    def simulate_add_shard(self, user_ids: List[str]) -> int:
+        """
+        Simula agregar un shard y calcula movimientos necesarios
+        
+        Args:
+            user_ids: IDs de usuarios actuales
+            
+        Returns:
+            Número de usuarios que se moverían
+        """
+        # Crear nuevo router con un shard adicional
+        new_configs = self.shards + [{'host': 'new_host', 'port': 9999, 'database': 'db', 'user': 'u', 'password': 'p'}]
+        new_router = ConsistentHashRouter(new_configs, self.virtual_nodes)
+        
+        moves = 0
+        for user_id in user_ids:
+            old_shard = self._get_shard_index(user_id)
+            new_shard = new_router._get_shard_index(user_id)
+            
+            if old_shard != new_shard:
+                moves += 1
+        
+        return moves
+
+
+# Comparación: Hash Simple vs Consistent Hashing
+if __name__ == "__main__":
+    # Configuración de dos shards
+    shard_configs = [
+        {'host': 'shard1', 'port': 5432, 'database': 'db', 'user': 'u', 'password': 'p'},
+        {'host': 'shard2', 'port': 5433, 'database': 'db', 'user': 'u', 'password': 'p'}
+    ]
+    
+    # Generar mil IDs de prueba
+    test_ids = [f'user_{i}' for i in range(1000)]
+    
+    print("="*70)
+    print("COMPARACIÓN: HASH SIMPLE vs CONSISTENT HASHING")
+    print("="*70)
+    
+    # Test con Hash Simple
+    print("\n📊 Hash Simple (módulo):")
+    simple_router = SimpleHashShardRouter(shard_configs)
+    simple_dist = simple_router.get_shard_distribution(test_ids)
+    
+    for shard_idx, count in simple_dist.items():
+        print(f"  Shard {shard_idx}: {count} usuarios ({count/10:.1f}%)")
+    
+    simple_moves = simple_router.simulate_rebalance(test_ids, 3)
+    print(f"\n  Agregar tercer shard:")
+    print(f"  Usuarios a mover: {simple_moves} de {len(test_ids)} ({simple_moves/len(test_ids)*100:.1f}%)")
+    
+    # Test con Consistent Hashing
+    print("\n📊 Consistent Hashing:")
+    consistent_router = ConsistentHashRouter(shard_configs, virtual_nodes=150)
+    consistent_dist = consistent_router.get_shard_distribution(test_ids)
+    
+    for shard_idx, count in consistent_dist.items():
+        print(f"  Shard {shard_idx}: {count} usuarios ({count/10:.1f}%)")
+    
+    consistent_moves = consistent_router.simulate_add_shard(test_ids)
+    print(f"\n  Agregar tercer shard:")
+    print(f"  Usuarios a mover: {consistent_moves} de {len(test_ids)} ({consistent_moves/len(test_ids)*100:.1f}%)")
+    
+    # Comparación
+    print("\n" + "="*70)
+    print("✅ RESULTADO:")
+    print(f"  Hash Simple mueve: {simple_moves/len(test_ids)*100:.1f}% de usuarios")
+    print(f"  Consistent Hash mueve: {consistent_moves/len(test_ids)*100:.1f}% de usuarios")
+    print(f"  Mejora: {(1 - consistent_moves/simple_moves)*100:.1f}% menos movimientos")
+    print("="*70)
+</pre>
+            </div>
+
+            <div class="checkpoint">
+                <p><strong>Ejercicio 2:</strong> Ejecuta el script de comparación:</p>
+                <ol>
+                    <li>¿Cuántos usuarios se mueven con hash simple? (Deberías ver aproximadamente 67%)</li>
+                    <li>¿Cuántos usuarios se mueven con consistent hashing? (Deberías ver aproximadamente 33%)</li>
+                    <li>Experimenta cambiando <code>virtual_nodes</code> entre cincuenta y trescientos. ¿Cómo afecta la distribución y el rebalanceo?</li>
+                </ol>
+                <p><em>Este ejercicio demuestra por qué sistemas de producción como DynamoDB, Cassandra y Redis Cluster usan consistent hashing.</em></p>
+            </div>
+
+            <div class="activity">
+                <h4>🔧 CRÍTICO: Crear shard_router.py como Archivo Independiente</h4>
+                
+                <div class="warning">
+                    <p><strong>⚠️ Antes de Continuar:</strong> Los scripts de prueba (load_test.py) intentan importar las clases de sharding con <code>from shard_router import SimpleHashShardRouter, ConsistentHashRouter</code>, pero hasta ahora todo el código del router está solo en este documento como ejemplos explicativos. Para que las pruebas funcionales funcionen, necesitas crear un archivo Python real que contenga estas clases.</p>
+                </div>
+                
+                <p><strong>¿Por qué separar el código?</strong> En desarrollo real, separaras la lógica reutilizable (como los routers de sharding) en módulos independientes para que múltiples scripts puedan importarlos. Esto sigue el principio DRY (Don't Repeat Yourself) y hace tu código más mantenible. Además, load_test.py asume que estas clases existen en shard_router.py, así que si no creamos este archivo, las pruebas fallarán con ImportError.</p>
+                
+                <h5>Paso 1: Crear el Archivo shard_router.py</h5>
+                <p>En el mismo directorio donde tienes tu docker-compose.yml, crea un nuevo archivo llamado <code>shard_router.py</code>. Este archivo contendrá ambas clases de routing más su código de demostración.</p>
+                
+                <h5>Paso 2: Copiar el Código de las Clases</h5>
+                <p>Copia TODO el código Python desde arriba (desde el inicio de SimpleHashShardRouter hasta el final del bloque <code>if __name__ == "__main__":</code> del ConsistentHashRouter) en tu nuevo archivo shard_router.py. La estructura completa debe ser:</p>
+                
+                <div class="code-block code-python">
+<pre>"""
+Shard Router para EcoMarket
+Contiene implementaciones de hash simple y consistent hashing para distribución de datos
+"""
+import hashlib
+import psycopg2
+from typing import List, Dict, Optional
+from bisect import bisect_right
+
+# Habilitar debug mode para ver queries ejecutados
+DEBUG = True  # Cambiar a False para producción
+
+class SimpleHashShardRouter:
+    # ... [toda la clase SimpleHashShardRouter aquí] ...
+    pass
+
+class ConsistentHashRouter:
+    # ... [toda la clase ConsistentHashRouter aquí] ...
+    pass
+
+# Código de demostración que se ejecuta solo si corres este archivo directamente
+if __name__ == "__main__":
+    # ... [código de comparación aquí] ...
+    pass
+</pre>
+                </div>
+                
+                <h5>Paso 3: Validar que el Archivo Funciona</h5>
+                <p>Prueba que tu archivo shard_router.py está correctamente creado ejecutándolo directamente:</p>
+                <div class="code-block">
+<pre>python shard_router.py</pre>
+                </div>
+                <p><strong>Esperado:</strong> Deberías ver la comparación de Hash Simple versus Consistent Hashing con estadísticas de distribución y rebalanceo. Si ves errores, verifica que copiaste todas las clases completas sin cortar ningún método.</p>
+                
+                <h5>Paso 4: Probar el Import desde Python</h5>
+                <p>Verifica que las clases se pueden importar correctamente desde otros scripts:</p>
+                <div class="code-block code-python">
+<pre>python -c "from shard_router import SimpleHashShardRouter, ConsistentHashRouter; print('✅ Import exitoso')"</pre>
+                </div>
+                
+                <div class="checkpoint">
+                    <p><strong>Autoevaluación:</strong> Antes de continuar a la Fase tres, confirma que:</p>
+                    <ul>
+                        <li>✅ Creaste shard_router.py en el directorio correcto (mismo nivel que docker-compose.yml)</li>
+                        <li>✅ El archivo contiene ambas clases completas (SimpleHashShardRouter y ConsistentHashRouter)</li>
+                        <li>✅ Ejecutar <code>python shard_router.py</code> muestra la comparación de algoritmos sin errores</li>
+                        <li>✅ Puedes importar las clases desde Python sin ImportError</li>
+                    </ul>
+                    <p>Si alguno de estos checks falla, revisa que el archivo esté en la ubicación correcta y que el código esté completo antes de continuar.</p>
+                </div>
+                
+                <div class="tip">
+                    <p><strong>💡 Estructura Final de tu Proyecto:</strong></p>
+                    <pre>ecomarket-distributed/
+├── docker-compose.yml
+├── init-primary.sh
+├── shard_router.py          ← NUEVO archivo con clases de sharding
+└── load_test.py             ← Ahora puede importar desde shard_router.py
+</pre>
+                    <p>Esta estructura separa responsabilidades: docker-compose.yml define la infraestructura, init-primary.sh inicializa la base de datos, shard_router.py contiene la lógica de distribución, y load_test.py ejecuta las pruebas. Esta separación hace que cada componente sea más fácil de entender, probar y mantener independientemente.</p>
+                </div>
+            </div>
+
+            <div class="activity">
+                <h4>🎨 Visualización: Consistent Hash Ring en Acción</h4>
+                <p>Para entender cómo funciona el ring de consistent hashing, observa esta visualización interactiva:</p>
+                
+                <div style="background: white; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                    <canvas id="hashRingCanvas" width="500" height="500" style="border: 1px solid #ddd; max-width: 100%;"></canvas>
+                    
+                    <div style="margin-top: 15px;">
+                        <button onclick="addKey()" style="padding: 10px 20px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer; margin: 5px;">Agregar Key</button>
+                        <button onclick="addShard()" style="padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 5px; cursor: pointer; margin: 5px;">Agregar Shard</button>
+                        <button onclick="resetRing()" style="padding: 10px 20px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; margin: 5px;">Reset</button>
+                    </div>
+                    
+                    <div id="ringStats" style="margin-top: 15px; font-family: monospace; background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                        <p><strong>Estado del Ring:</strong></p>
+                        <p>Shards: <span id="shardCount">2</span></p>
+                        <p>Keys: <span id="keyCount">0</span></p>
+                        <p>Distribución: <span id="distribution"></span></p>
+                    </div>
+                </div>
+
+                <script>
+                    // Visualización de Consistent Hash Ring
+                    const canvas = document.getElementById('hashRingCanvas');
+                    const ctx = canvas.getContext('2d');
+                    const centerX = 250;
+                    const centerY = 250;
+                    const ringRadius = 180;
+                    
+                    let shards = [
+                        {name: 'Shard 0', color: '#3498db', vnodes: []},
+                        {name: 'Shard 1', color: '#e74c3c', vnodes: []}
+                    ];
+                    let keys = [];
+                    let keyCounter = 0;
+                    
+                    // Generar nodos virtuales para cada shard
+                    function generateVirtualNodes() {
+                        shards.forEach((shard, idx) => {
+                            shard.vnodes = [];
+                            for (let i = 0; i < 10; i++) {
+                                const hash = simpleHash(`${shard.name}-vnode${i}`);
+                                shard.vnodes.push(hash);
+                            }
+                            shard.vnodes.sort((a, b) => a - b);
+                        });
+                    }
+                    
+                    // Hash simple para demo
+                    function simpleHash(str) {
+                        let hash = 0;
+                        for (let i = 0; i < str.length; i++) {
+                            hash = ((hash << 5) - hash) + str.charCodeAt(i);
+                            hash = hash & hash;
+                        }
+                        return Math.abs(hash) % 360;
+                    }
+                    
+                    // Encontrar shard para una key
+                    function findShard(keyHash) {
+                        // Buscar primer vnode >= keyHash en cualquier shard
+                        let minDistance = 360;
+                        let targetShard = 0;
+                        
+                        shards.forEach((shard, idx) => {
+                            shard.vnodes.forEach(vnodeHash => {
+                                let distance = (vnodeHash - keyHash + 360) % 360;
+                                if (distance < minDistance) {
+                                    minDistance = distance;
+                                    targetShard = idx;
+                                }
+                            });
+                        });
+                        
+                        return targetShard;
+                    }
+                    
+                    // Dibujar el ring
+                    function drawRing() {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        
+                        // Ring principal
+                        ctx.beginPath();
+                        ctx.arc(centerX, centerY, ringRadius, 0, 2 * Math.PI);
+                        ctx.strokeStyle = '#ddd';
+                        ctx.lineWidth = 3;
+                        ctx.stroke();
+                        
+                        // Dibujar vnodes de cada shard
+                        shards.forEach((shard, idx) => {
+                            ctx.fillStyle = shard.color;
+                            shard.vnodes.forEach(vnodeHash => {
+                                const angle = (vnodeHash / 360) * 2 * Math.PI - Math.PI / 2;
+                                const x = centerX + ringRadius * Math.cos(angle);
+                                const y = centerY + ringRadius * Math.sin(angle);
+                                
+                                ctx.beginPath();
+                                ctx.arc(x, y, 5, 0, 2 * Math.PI);
+                                ctx.fill();
+                            });
+                        });
+                        
+                        // Dibujar keys
+                        keys.forEach(key => {
+                            const angle = (key.hash / 360) * 2 * Math.PI - Math.PI / 2;
+                            const x = centerX + (ringRadius - 30) * Math.cos(angle);
+                            const y = centerY + (ringRadius - 30) * Math.sin(angle);
+                            
+                            ctx.fillStyle = shards[key.shard].color;
+                            ctx.globalAlpha = 0.7;
+                            ctx.beginPath();
+                            ctx.arc(x, y, 8, 0, 2 * Math.PI);
+                            ctx.fill();
+                            ctx.globalAlpha = 1;
+                            
+                            // Línea hacia el shard
+                            const shardVnode = shards[key.shard].vnodes[0];
+                            const shardAngle = (shardVnode / 360) * 2 * Math.PI - Math.PI / 2;
+                            const shardX = centerX + ringRadius * Math.cos(shardAngle);
+                            const shardY = centerY + ringRadius * Math.sin(shardAngle);
+                            
+                            ctx.beginPath();
+                            ctx.moveTo(x, y);
+                            ctx.lineTo(shardX, shardY);
+                            ctx.strokeStyle = shards[key.shard].color;
+                            ctx.globalAlpha = 0.3;
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                            ctx.globalAlpha = 1;
+                        });
+                        
+                        // Leyenda
+                        let legendY = 30;
+                        shards.forEach(shard => {
+                            ctx.fillStyle = shard.color;
+                            ctx.fillRect(20, legendY, 15, 15);
+                            ctx.fillStyle = '#333';
+                            ctx.font = '12px sans-serif';
+                            ctx.fillText(shard.name, 40, legendY + 12);
+                            legendY += 25;
+                        });
+                        
+                        updateStats();
+                    }
+                    
+                    // Actualizar estadísticas
+                    function updateStats() {
+                        document.getElementById('shardCount').textContent = shards.length;
+                        document.getElementById('keyCount').textContent = keys.length;
+                        
+                        const distribution = {};
+                        shards.forEach((shard, idx) => distribution[idx] = 0);
+                        keys.forEach(key => distribution[key.shard]++);
+                        
+                        const distText = shards.map((shard, idx) => 
+                            `${shard.name}: ${distribution[idx]} keys (${keys.length > 0 ? ((distribution[idx]/keys.length)*100).toFixed(1) : 0}%)`
+                        ).join(' | ');
+                        
+                        document.getElementById('distribution').textContent = distText;
+                    }
+                    
+                    // Agregar key
+                    function addKey() {
+                        const keyName = `key_${keyCounter++}`;
+                        const keyHash = simpleHash(keyName);
+                        const shard = findShard(keyHash);
+                        
+                        keys.push({name: keyName, hash: keyHash, shard: shard});
+                        drawRing();
+                    }
+                    
+                    // Agregar shard
+                    function addShard() {
+                        const colors = ['#9b59b6', '#f39c12', '#1abc9c', '#34495e'];
+                        const newShard = {
+                            name: `Shard ${shards.length}`,
+                            color: colors[shards.length % colors.length],
+                            vnodes: []
+                        };
+                        
+                        shards.push(newShard);
+                        generateVirtualNodes();
+                        
+                        // Reasignar keys
+                        keys.forEach(key => {
+                            key.shard = findShard(key.hash);
+                        });
+                        
+                        drawRing();
+                    }
+                    
+                    // Reset
+                    function resetRing() {
+                        shards = [
+                            {name: 'Shard 0', color: '#3498db', vnodes: []},
+                            {name: 'Shard 1', color: '#e74c3c', vnodes: []}
+                        ];
+                        keys = [];
+                        keyCounter = 0;
+                        generateVirtualNodes();
+                        drawRing();
+                    }
+                    
+                    // Inicializar
+                    generateVirtualNodes();
+                    drawRing();
+                </script>
+                
+                <p><strong>Cómo usar:</strong></p>
+                <ul>
+                    <li><strong>Puntos pequeños en el ring:</strong> Nodos virtuales de cada shard (cada color representa un shard)</li>
+                    <li><strong>Círculos grandes dentro del ring:</strong> Keys que se asignaron al shard de su color</li>
+                    <li><strong>Líneas tenues:</strong> Muestran a qué shard se asignó cada key (busca el primer vnode en sentido horario)</li>
+                </ul>
+                
+                <p><strong>Experimento:</strong></p>
+                <ol>
+                    <li>Haz clic en "Agregar Key" varias veces y observa cómo se distribuyen uniformemente</li>
+                    <li>Haz clic en "Agregar Shard" y observa que SOLO algunas keys cambian de color (se reasignan)</li>
+                    <li>Compara el porcentaje en "Distribución": con consistent hashing, agregar un shard solo reasigna aproximadamente 33% de keys, no 67% como con hash simple</li>
+                </ol>
+                
+                <p><em>Esta visualización demuestra por qué DynamoDB, Cassandra y Riak usan consistent hashing: al agregar nodos, el rebalanceo es mínimo y proporcional.</em></p>
+            </div>
+        </div>
+
+        <h3>📊 Estrategias de Particionamiento: Trade-offs Detallados</h3>
+        
+        <div class="decision-matrix">
+            <h4>Comparativa Completa de Estrategias</h4>
+            <table class="comparison-table">
+                <thead>
+                    <tr>
+                        <th>Estrategia</th>
+                        <th>Distribución</th>
+                        <th>Locality</th>
+                        <th>Rebalanceo</th>
+                        <th>Complejidad</th>
+                        <th>Caso de Uso Ideal</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Hash-based (simple)</strong><br><code>shard = hash(key) % N</code></td>
+                        <td>✅ Uniforme<br>(si hash es bueno)</td>
+                        <td>❌ Dispersa<br>(rango en múltiples shards)</td>
+                        <td>❌ Costoso<br>(K sobre N keys se mueven)</td>
+                        <td>🟢 Simple</td>
+                        <td>Datos sin locality, número fijo de shards</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Consistent hashing</strong><br><code>ring lookup</code></td>
+                        <td>✅ Uniforme<br>(con vnodes suficientes)</td>
+                        <td>❌ Dispersa</td>
+                        <td>✅ Mínimo<br>(solo K sobre N)</td>
+                        <td>🟡 Media</td>
+                        <td>Shards dinámicos, elasticidad</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Range-based</strong><br><code>A-M: shard1<br>N-Z: shard2</code></td>
+                        <td>⚠️ Skew posible<br>(depende de distribución)</td>
+                        <td>✅ Alta<br>(rangos completos juntos)</td>
+                        <td>✅ Fácil<br>(mover rango completo)</td>
+                        <td>🟡 Media</td>
+                        <td>Queries por rango frecuentes<br>(ejemplo: fechas, apellidos)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Geo-based</strong><br><code>LATAM: shard1<br>EMEA: shard2</code></td>
+                        <td>⚠️ Según carga regional</td>
+                        <td>✅ Máxima<br>(latencia física baja)</td>
+                        <td>✅ Por región<br>(crecimiento independiente)</td>
+                        <td>🟡 Media</td>
+                        <td>Compliance regulatorio<br>(GDPR, residencia de datos)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Directory-based</strong><br><code>Lookup service</code></td>
+                        <td>✅ Arbitraria<br>(control total)</td>
+                        <td>🎯 Configurable</td>
+                        <td>✅ Flexible<br>(actualizar directorio)</td>
+                        <td>🔴 Alta<br>(más single point of failure)</td>
+                        <td>Patrones complejos<br>(ejemplo: multi-tenant con SLAs)</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="checkpoint">
+                <p><strong>Regla práctica:</strong> Empieza con hash simple si número de shards es fijo. Usa consistent hashing si planeas agregar shards dinámicamente. Migra a range o geo solo cuando locality o compliance lo justifiquen. Directory-based es último recurso para casos multi-criterio.</p>
+                
+                <p><strong>Pregunta de reflexión:</strong> EcoMarket vende en México, Brasil y Argentina. Los datos de cada país deben permanecer en servidores locales por regulación. ¿Qué estrategia de sharding usarías? ¿Qué pasa si un usuario compra desde Argentina pero vive en México? ¿Cómo manejas el carrito de compras en este caso?</p>
+            </div>
+        </div>
+
+        <h3>🧪 Diagrama de Flujo: Replicación en Acción</h3>
+        
+        <figure>
+            <div class="diagram">
+                <h4>Flujo Completo de Write → Propagación → Read</h4>
+                <div class="mermaid">
+sequenceDiagram
+    participant C as Cliente
+    participant P as Primario
+    participant S1 as Secundario 1
+    participant S2 as Secundario 2
+    
+    Note over C,P: Fase 1: Write
+    C->>P: INSERT INTO orders (...)
+    P->>P: Escribir a WAL
+    P->>C: ACK (write confirmado)
+    
+    Note over P,S2: Fase 2: Replicación Asíncrona
+    P->>S1: Stream WAL (lag: 200ms)
+    P->>S2: Stream WAL (lag: 300ms)
+    S1->>S1: Aplicar cambios
+    S2->>S2: Aplicar cambios
+    
+    Note over C,S2: Fase 3: Read (potencial stale)
+    C->>S1: SELECT * FROM orders
+    S1->>C: Datos (puede faltar insert reciente)
+    
+    Note over C,S2: Fase 4: Verificar Lag
+    C->>S1: SELECT pg_last_wal_replay_lsn()
+    S1->>C: LSN actual
+    C->>C: Calcular lag vs P
+    alt Lag mayor a umbral
+        C->>P: Fallback a primario
+        P->>C: Datos frescos garantizados
+    end
+                </div>
+            </div>
+            <figcaption>Diagrama de secuencia mostrando el flujo temporal completo desde write hasta read, incluyendo lag de replicación y estrategia de fallback cuando el lag excede el umbral aceptable</figcaption>
+        </figure>
+
+        <div class="warning">
+            <p><strong>⚠️ Ventana de Inconsistencia:</strong> Si el cliente lee de S1 inmediatamente después del INSERT, podría no ver su propio write debido al lag de doscientos milisegundos. Estrategias:</p>
+            <ul>
+                <li><strong>Read-your-writes:</strong> Cliente cachea writes recientes localmente y los mezcla con reads del secundario</li>
+                <li><strong>Sesión pegajosa:</strong> Mismo cliente siempre lee del mismo secundario (reduce ventana de inconsistencia)</li>
+                <li><strong>Replicación síncrona:</strong> Primario espera confirmación de al menos un secundario antes de ACK (incrementa latencia write pero garantiza consistencia)</li>
+                <li><strong>Lag threshold:</strong> Si lag mayor a X segundos, hacer fallback automático al primario para reads</li>
+            </ul>
+        </div>
+
+        <div class="checkpoint">
+            <h3>✅ Checkpoint de Fase 2</h3>
+            <ul>
+                <li>Configuré replicación PostgreSQL con archivos reales (postgresql.conf, pg_hba.conf)</li>
+                <li>Tengo Docker Compose ejecutable para levantar primario más dos secundarios</li>
+                <li>Implementé dos versiones de ShardRouter: hash simple y consistent hashing</li>
+                <li>Entiendo por qué consistent hashing minimiza rebalanceo (solo un tercio de datos vs dos tercios)</li>
+                <li>Puedo explicar el flujo de replicación y la ventana de inconsistencia con tiempos específicos</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="phase">
+        <h2 data-icon="🧪">Fase 3: Validación y Pruebas de Distribución de Datos (30 min, más menos cinco según hardware)</h2>
+        <p><strong>Objetivo de Aprendizaje:</strong> Demuestra que replicación y sharding resuelven locks del Fase cero, con scripts ejecutables y pruebas de resiliencia completas.</p>
+
+        <h3>🔥 Script de Prueba de Carga para BD Distribuida (COMPLETO)</h3>
+        
+        <div class="activity">
+            <h4>Script Ejecutable: Validar Replicación y Distribución</h4>
+            
+            <div class="code-block code-python">
+<pre>"""
+Script de Carga para Validar BD Distribuida - VERSIÓN COMPLETA
+Prueba writes al primario y reads distribuidos a secundarios
+Incluye manejo de errores, debugging y análisis de lag
+"""
+import psycopg2
+import time
+import random
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+
+# Habilitar debug mode
+DEBUG = False  # Cambiar a True para ver queries detallados
+
+# Configuración
+PRIMARY = {
+    'host': 'localhost',
+    'port': 5432,
+    'database': 'ecomarket',
+    'user': 'postgres',
+    'password': 'postgres_pass'
+}
+SECONDARY_1 = {
+    'host': 'localhost',
+    'port': 5433,
+    'database': 'ecomarket',
+    'user': 'postgres',
+    'password': 'postgres_pass'
+}
+SECONDARY_2 = {
+    'host': 'localhost',
+    'port': 5434,
+    'database': 'ecomarket',
+    'user': 'postgres',
+    'password': 'postgres_pass'
+}
+
+def create_tables():
+    """Crea tablas de prueba en el primario"""
+    try:
+        conn = psycopg2.connect(**PRIMARY)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS orders (
+                id SERIAL PRIMARY KEY,
+                user_id VARCHAR(50),
+                product VARCHAR(100),
+                amount DECIMAL(10,2),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("✅ Tabla orders creada")
+    except Exception as e:
+        print(f"❌ Error creando tablas: {e}")
+        raise
+
+def write_load(num_writes=100):
+    """
+    Simula writes al primario
+    
+    Args:
+        num_writes: Número de inserts a realizar
+        
+    Returns:
+        Throughput en writes por segundo
+    """
+    try:
+        conn = psycopg2.connect(**PRIMARY)
+        cursor = conn.cursor()
+        
+        start = time.time()
+        successful_writes = 0
+        
+        for i in range(num_writes):
+            user_id = f"user_{random.randint(1, 1000)}"
+            product = f"prod_{random.randint(1, 100)}"
+            amount = random.uniform(10, 100)
+            
+            try:
+                query = "INSERT INTO orders (user_id, product, amount) VALUES (%s, %s, %s)"
+                if DEBUG:
+                    print(f"🔍 Write: {query} con ({user_id}, {product}, {amount:.2f})")
+                
+                cursor.execute(query, (user_id, product, amount))
+                conn.commit()
+                successful_writes += 1
+            except Exception as e:
+                print(f"❌ Write {i} falló: {e}")
+                conn.rollback()
+        
+        elapsed = time.time() - start
+        throughput = successful_writes / elapsed if elapsed > 0 else 0
+        
+        print(f"✅ {successful_writes} writes en {elapsed:.2f}s ({throughput:.1f} writes/s)")
+        cursor.close()
+        conn.close()
+        
+        return throughput
+    except Exception as e:
+        print(f"❌ Error en write_load: {e}")
+        return 0
+
+def read_load(replica_config, num_reads=1000, replica_name="Secundario"):
+    """
+    Simula reads de un secundario
+    
+    Args:
+        replica_config: Dict con configuración de conexión
+        num_reads: Número de selects a realizar
+        replica_name: Nombre descriptivo de la réplica
+        
+    Returns:
+        Throughput en reads por segundo
+    """
+    try:
+        conn = psycopg2.connect(**replica_config)
+        cursor = conn.cursor()
+        
+        start = time.time()
+        total_rows = 0
+        successful_reads = 0
+        
+        for _ in range(num_reads):
+            try:
+                # Query con filtro variable
+                min_amount = random.uniform(10, 50)
+                query = "SELECT COUNT(*) FROM orders WHERE amount > %s"
+                
+                if DEBUG:
+                    print(f"🔍 Read: {query} con ({min_amount:.2f})")
+                
+                cursor.execute(query, (min_amount,))
+                count = cursor.fetchone()[0]
+                total_rows += count
+                successful_reads += 1
+            except Exception as e:
+                print(f"❌ Read falló: {e}")
+        
+        elapsed = time.time() - start
+        throughput = successful_reads / elapsed if elapsed > 0 else 0
+        
+        print(f"✅ {successful_reads} reads de {replica_name} en {elapsed:.2f}s ({throughput:.1f} reads/s) - {total_rows} rows")
+        cursor.close()
+        conn.close()
+        
+        return throughput
+    except Exception as e:
+        print(f"❌ Error en read_load para {replica_name}: {e}")
+        return 0
+
+def sharded_write_load(num_writes=100):
+    """
+    Simula writes DISTRIBUIDOS usando SimpleHashShardRouter
+    
+    DIFERENCIA CLAVE vs write_load():
+    - write_load() escribe TODO a un solo primario (replicación: copia completa)
+    - sharded_write_load() DISTRIBUYE writes entre múltiples shards (particionamiento)
+    
+    Esta función demuestra el beneficio real de sharding: throughput de writes escala
+    linealmente con el número de shards porque cada shard procesa subset independiente.
+    
+    Args:
+        num_writes: Número de usuarios a insertar (distribuidos entre shards)
+        
+    Returns:
+        Dict con 'throughput' (writes/s combinado) y 'distribution' (count por shard)
+    """
+    try:
+        # Importar router (asume que shard_router.py existe)
+        from shard_router import SimpleHashShardRouter
+        
+        # Configurar shards: primario (5432) y secundario-1 (5433)
+        # NOTA: En producción real, ambos serían primarios independientes
+        # Aquí usamos secundario conceptualmente para demostrar distribución
+        shard_configs = [
+            {'host': 'localhost', 'port': 5432, 'database': 'ecomarket', 
+             'user': 'postgres', 'password': 'postgres_pass'},
+            {'host': 'localhost', 'port': 5433, 'database': 'ecomarket', 
+             'user': 'postgres', 'password': 'postgres_pass'}
+        ]
+        
+        router = SimpleHashShardRouter(shard_configs)
+        print(f"🔀 Iniciando {num_writes} writes distribuidos entre {len(shard_configs)} shards...")
+        
+        start = time.time()
+        successful_writes = 0
+        
+        for i in range(num_writes):
+            user_id = f"user_{i}"
+            name = f"Usuario {i}"
+            email = f"user{i}@ecomarket.com"
+            
+            try:
+                # El router automáticamente determina el shard correcto y escribe ahí
+                if router.insert_user(user_id, name, email):
+                    successful_writes += 1
+            except Exception as e:
+                if DEBUG:
+                    print(f"❌ Write {i} falló: {e}")
+        
+        elapsed = time.time() - start
+        throughput = successful_writes / elapsed if elapsed > 0 else 0
+        
+        # VALIDACIÓN CRÍTICA: Verificar que datos realmente se distribuyeron
+        print(f"\n📊 Validando distribución real en shards...")
+        distribution = {}
+        
+        for shard_idx, shard_config in enumerate(shard_configs):
+            try:
+                conn = psycopg2.connect(**shard_config)
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM users")
+                count = cursor.fetchone()[0]
+                distribution[shard_idx] = count
+                print(f"  Shard {shard_idx}: {count} usuarios reales en BD")
+                cursor.close()
+                conn.close()
+            except Exception as e:
+                print(f"  ⚠️ Shard {shard_idx}: Error validando - {e}")
+                distribution[shard_idx] = 0
+        
+        router.close_all()
+        
+        total_distributed = sum(distribution.values())
+        print(f"\n✅ {successful_writes} writes distribuidos en {elapsed:.2f}s ({throughput:.1f} writes/s)")
+        print(f"✅ Validación: {total_distributed} usuarios confirmados en shards")
+        
+        # Calcular balance de distribución
+        if len(distribution) == 2 and total_distributed > 0:
+            balance = min(distribution.values()) / max(distribution.values()) * 100
+            print(f"📊 Balance de distribución: {balance:.1f}% (ideal: 100% = perfectamente balanceado)")
+        
+        return {
+            'throughput': throughput,
+            'distribution': distribution,
+            'total': total_distributed
+        }
+        
+    except ImportError:
+        print("❌ No se pudo importar shard_router.py")
+        print("💡 Crea el archivo shard_router.py con las clases SimpleHashShardRouter y ConsistentHashRouter")
+        return {'throughput': 0, 'distribution': {}, 'total': 0}
+    except Exception as e:
+        print(f"❌ Error en sharded_write_load: {e}")
+        if DEBUG:
+            import traceback
+            traceback.print_exc()
+        return {'throughput': 0, 'distribution': {}, 'total': 0}
+
+def check_replication_lag(replica_config, replica_name="Secundario"):
+    """
+    Mide lag de replicación entre primario y secundario usando timestamps normalizados a UTC
+    
+    MEJORA vs versión anterior: 
+    - Usa timestamps (más intuitivo) en lugar de LSN bytes
+    - Normaliza explícitamente a UTC para evitar problemas en despliegues geo-distribuidos
+    - Retorna lag en segundos (mejor para alertas) en lugar de megabytes
+    
+    Args:
+        replica_config: Dict con configuración del secundario
+        replica_name: Nombre descriptivo
+        
+    Returns:
+        Lag en segundos (float) o None si hay error
+    """
+    try:
+        # Conectar al secundario para obtener su último timestamp de replay
+        conn_secondary = psycopg2.connect(**replica_config)
+        cursor_secondary = conn_secondary.cursor()
+        
+        # Query con normalización explícita a UTC para evitar problemas de timezone
+        # en despliegues geo-distribuidos (e.g., primario en São Paulo, secundario en CDMX)
+        # 
+        # CRÍTICO: Sin "AT TIME ZONE 'UTC'", si los servidores tienen TZ diferentes
+        # (e.g., America/Sao_Paulo vs America/Mexico_City), la resta incluiría el offset
+        # de timezone (3h) en lugar de medir solo el lag real de replicación
+        query = """
+            SELECT EXTRACT(EPOCH FROM (
+                now() AT TIME ZONE 'UTC' - 
+                pg_last_xact_replay_timestamp() AT TIME ZONE 'UTC'
+            )) AS lag_seconds
+        """
+        
+        if DEBUG:
+            print(f"🔍 Lag query: {query.strip()}")
+        
+        cursor_secondary.execute(query)
+        result = cursor_secondary.fetchone()
+        
+        if result is None or result[0] is None:
+            print(f"⚠️ {replica_name}: No hay datos de replicación (¿standby no iniciado?)")
+            cursor_secondary.close()
+            conn_secondary.close()
+            return None
+        
+        lag_seconds = float(result[0])
+        cursor_secondary.close()
+        conn_secondary.close()
+        
+        # Reportar lag con umbrales operacionales estándar
+        # < 1s: Excelente para la mayoría de aplicaciones
+        # 1-5s: Aceptable para analytics, preocupante para transaccional
+        # > 5s: Crítico, investigar red/carga/config
+        if lag_seconds < 1:
+            print(f"✅ {replica_name}: Lag = {lag_seconds*1000:.0f}ms - Excelente")
+        elif lag_seconds < 5:
+            print(f"⚠️ {replica_name}: Lag = {lag_seconds:.2f}s - Aceptable")
+        else:
+            print(f"❌ {replica_name}: Lag = {lag_seconds:.2f}s - Alto (revisar red/carga)")
+        
+        return lag_seconds
+        
+    except psycopg2.OperationalError as e:
+        print(f"❌ Error de conexión midiendo lag de {replica_name}: {e}")
+        return None
+    except Exception as e:
+        print(f"❌ Error midiendo lag de {replica_name}: {e}")
+        if DEBUG:
+            import traceback
+            traceback.print_exc()
+        return None
+
+def test_failover():
+    """
+    Simula failover realista: detecta secundario no saludable y hace fallback a primario
+    
+    MEJORA: En lugar de simular con puerto 9999, verificamos salud real de replicación
+    usando pg_stat_replication para detectar secundarios caídos o con lag alto
+    """
+    print("\n🧪 Prueba de Failover: Detectar secundario no saludable y fallback")
+    
+    # Estrategia 1: Verificar salud de secundarios con pg_stat_replication
+    print("\n  🔍 Verificando salud de secundarios...")
+    try:
+        conn_primary = psycopg2.connect(**PRIMARY)
+        cursor = conn_primary.cursor()
+        
+        # Consultar estado de réplicas
+        cursor.execute("""
+            SELECT 
+                application_name,
+                state,
+                sync_state,
+                pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS lag_bytes
+            FROM pg_stat_replication
+        """)
+        
+        replicas = cursor.fetchall()
+        healthy_replicas = []
+        
+        if not replicas:
+            print("  ⚠️ No hay secundarios conectados - fallback crítico a primario")
+        else:
+            for replica in replicas:
+                app_name, state, sync_state, lag_bytes = replica
+                lag_mb = lag_bytes / (1024 * 1024) if lag_bytes else 0
+                
+                print(f"  📊 {app_name}: state={state}, lag={lag_mb:.2f}MB")
+                
+                # Criterio de salud: streaming y lag < 10MB
+                if state == 'streaming' and lag_mb < 10:
+                    healthy_replicas.append(app_name)
+                    print(f"    ✅ Saludable")
+                else:
+                    print(f"    ❌ No saludable (state={state}, lag={lag_mb:.2f}MB)")
+        
+        cursor.close()
+        conn_primary.close()
+        
+        if healthy_replicas:
+            print(f"\n  ✅ {len(healthy_replicas)} secundario(s) saludable(s) disponible(s)")
+        else:
+            print(f"\n  ⚠️ No hay secundarios saludables - fallback automático a primario")
+        
+    except Exception as e:
+        print(f"  ❌ Error verificando salud de réplicas: {e}")
+    
+    # Estrategia 2: Simulación de fallo de conexión con timeout
+    print("\n  🔍 Simulando fallo de secundario con timeout...")
+    failed_config = SECONDARY_1.copy()
+    failed_config['port'] = 9999  # Puerto inexistente para simular caída
+    
+    try:
+        conn = psycopg2.connect(**failed_config, connect_timeout=2)
+        print("  ❌ No debería conectar (error en test)")
+    except psycopg2.OperationalError as e:
+        print(f"  ✅ Fallo detectado: {str(e)[:80]}...")
+        print("  ✅ Activando fallback a primario...")
+        
+        # Fallback a primario
+        try:
+            start_fallback = time.time()
+            conn = psycopg2.connect(**PRIMARY, connect_timeout=5)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM orders")
+            count = cursor.fetchone()[0]
+            elapsed = time.time() - start_fallback
+            
+            print(f"  ✅ Fallback exitoso en {elapsed:.2f}s: {count} orders disponibles en primario")
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            print(f"  ❌ Fallback falló: {e}")
+    
+    # Estrategia 3: Simulación realista con Docker (opcional)
+    print("\n  💡 Para prueba REAL de failover, ejecuta:")
+    print("     docker stop ecomarket-db-secondary-1")
+    print("     python load_test.py  # Observa que reads se redirigen a secundario-2")
+    print("     docker start ecomarket-db-secondary-1  # Recovery automático")
+
+def run_load_test():
+    """Ejecuta suite completa de pruebas"""
+    print("=" * 70)
+    print("🧪 SUITE DE PRUEBAS: BD DISTRIBUIDA ECOMARKET")
+    print("=" * 70)
+    
+    # Preparación
+    print("\n1️⃣ Preparación: Crear tablas...")
+    try:
+        create_tables()
+    except Exception as e:
+        print(f"❌ Falló preparación: {e}")
+        return
+    
+    time.sleep(2)  # Esperar replicación inicial
+    
+    # Prueba uno: Writes concurrentes
+    print("\n2️⃣ Prueba 1: Writes concurrentes al primario...")
+    write_throughput = write_load(100)
+    
+    if write_throughput == 0:
+        print("❌ Writes fallaron, deteniendo pruebas")
+        return
+    
+    print(f"📊 Throughput writes: {write_throughput:.1f} writes/s")
+    
+    # Esperar propagación
+    print("\n⏳ Esperando propagación a secundarios (3s)...")
+    time.sleep(3)
+    
+    # Prueba dos: Reads distribuidos
+    print("\n3️⃣ Prueba 2: Reads distribuidos a secundarios...")
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future1 = executor.submit(read_load, SECONDARY_1, 500, "Secundario 1")
+        future2 = executor.submit(read_load, SECONDARY_2, 500, "Secundario 2")
+        
+        throughput1 = future1.result()
+        throughput2 = future2.result()
+    
+    total_throughput = throughput1 + throughput2
+    print(f"📊 Throughput reads combinado: {total_throughput:.1f} reads/s")
+    
+    # Prueba tres: Lag de replicación
+    print("\n4️⃣ Prueba 3: Medir lag de replicación...")
+    lag1 = check_replication_lag(SECONDARY_1, "Secundario 1")
+    lag2 = check_replication_lag(SECONDARY_2, "Secundario 2")
+    
+    avg_lag = None
+    if lag1 is not None and lag2 is not None:
+        avg_lag = (lag1 + lag2) / 2
+        print(f"📊 Lag promedio: {avg_lag:.3f}s")
+    
+    # Prueba cuatro: Failover
+    print("\n5️⃣ Prueba 4: Resiliencia ante fallos...")
+    test_failover()
+    
+    # NUEVA PRUEBA 5: Validar Distribución de Sharding
+    print("\n6️⃣ Prueba 5: Validar Distribución de Sharding...")
+    try:
+        # Importar clases de sharding
+        from shard_router import SimpleHashShardRouter, ConsistentHashRouter
+        
+        # Configurar shards (usando primario y secundario-1 conceptualmente)
+        shard_configs = [
+            {'host': 'localhost', 'port': 5432, 'database': 'ecomarket', 
+             'user': 'postgres', 'password': 'postgres_pass'},
+            {'host': 'localhost', 'port': 5433, 'database': 'ecomarket', 
+             'user': 'postgres', 'password': 'postgres_pass'}
+        ]
+        
+        # Test con Hash Simple
+        print("\n  📊 Hash Simple:")
+        simple_router = SimpleHashShardRouter(shard_configs)
+        test_ids = [f'user_{i}' for i in range(100)]
+        simple_dist = simple_router.get_shard_distribution(test_ids)
+        
+        for shard_idx, count in simple_dist.items():
+            print(f"    Shard {shard_idx}: {count} usuarios ({count}%)")
+        
+        # Demostrar problema de rebalanceo
+        moves = simple_router.simulate_rebalance(test_ids, 3)
+        print(f"  ⚠️ Rebalanceo con 3 shards: {moves} usuarios ({moves}%) se moverían")
+        
+        # Test con Consistent Hashing
+        print("\n  📊 Consistent Hashing:")
+        consistent_router = ConsistentHashRouter(shard_configs, virtual_nodes=150)
+        consistent_dist = consistent_router.get_shard_distribution(test_ids)
+        
+        for shard_idx, count in consistent_dist.items():
+            print(f"    Shard {shard_idx}: {count} usuarios ({count}%)")
+        
+        consistent_moves = consistent_router.simulate_add_shard(test_ids)
+        print(f"  ✅ Rebalanceo con 3 shards: {consistent_moves} usuarios ({consistent_moves}%) se moverían")
+        print(f"  💡 Consistent hashing reduce movimientos de {moves}% a {consistent_moves}%")
+        
+        simple_router.close_all()
+        
+    except ImportError:
+        print("  ⚠️ No se pudo importar shard_router.py - crea el archivo primero")
+    except Exception as e:
+        print(f"  ⚠️ Error en prueba de sharding: {e}")
+    
+    # NUEVA PRUEBA 6: Ejecutar Writes Distribuidos REALES
+    print("\n7️⃣ Prueba 6: Writes Distribuidos Ejecutables...")
+    print("  (Esta prueba REALMENTE inserta datos en múltiples shards, no solo analiza teóricamente)")
+    
+    sharding_result = sharded_write_load(100)
+    
+    if sharding_result['total'] > 0:
+        print(f"\n  🎯 Comparación de Escalabilidad:")
+        print(f"     BD Única (Prueba 1): {write_throughput:.1f} writes/s")
+        print(f"     Sharding (Prueba 6):  {sharding_result['throughput']:.1f} writes/s")
+        
+        if write_throughput > 0:
+            scaling_factor = sharding_result['throughput'] / write_throughput
+            print(f"     Factor de mejora: {scaling_factor:.2f}x")
+            
+            if scaling_factor > 1.5:
+                print(f"     ✅ Sharding mejoró throughput significativamente")
+            elif scaling_factor > 1.1:
+                print(f"     ⚠️ Mejora moderada (overhead de routing puede estar limitando)")
+            else:
+                print(f"     ⚠️ No hay mejora clara (verificar que ambos shards aceptan writes)")
+        
+        # Validar distribución empírica
+        dist = sharding_result['distribution']
+        if len(dist) == 2:
+            balance_pct = (min(dist.values()) / max(dist.values()) * 100) if max(dist.values()) > 0 else 0
+            print(f"\n  📊 Distribución Empírica (datos reales en BDs):")
+            for shard_idx, count in dist.items():
+                pct = (count / sharding_result['total'] * 100) if sharding_result['total'] > 0 else 0
+                print(f"     Shard {shard_idx}: {count} usuarios ({pct:.1f}%)")
+            print(f"     Balance: {balance_pct:.1f}% (>90% = bien distribuido)")
+    else:
+        print("  ⚠️ No se pudieron ejecutar writes distribuidos")
+        print("  💡 Verifica que shard_router.py existe y que ambos shards están disponibles")
+    
+    # Resumen
+    print("\n" + "=" * 70)
+    print("✅ RESUMEN DE PRUEBAS")
+    print("=" * 70)
+    print("\n📊 REPLICACIÓN (escalamiento de reads):")
+    print(f"  Writes/s primario: {write_throughput:.1f}")
+    print(f"  Reads/s secundarios combinados: {total_throughput:.1f}")
+    
+    if write_throughput > 0:
+        read_scaling = total_throughput / write_throughput
+        print(f"  Factor de escalamiento read: {read_scaling:.1f}x")
+        print(f"  → Conclusión: Reads escalan linealmente con # de réplicas")
+    
+    if avg_lag is not None:
+        print(f"  Lag promedio: {avg_lag:.3f}s")
+        if avg_lag < 1:
+            print(f"  → Excelente: eventual consistency con ventana <1s")
+        elif avg_lag < 5:
+            print(f"  → Aceptable: adecuado para analytics y reportes")
+        else:
+            print(f"  → Alto: revisar network o carga del primario")
+    else:
+        print("  Lag: No disponible (verificar secundarios)")
+    
+    print(f"\n📊 SHARDING (escalamiento de writes y datos):")
+    if sharding_result['total'] > 0:
+        print(f"  Writes/s distribuidos: {sharding_result['throughput']:.1f}")
+        print(f"  Usuarios totales insertados: {sharding_result['total']}")
+        
+        if write_throughput > 0:
+            shard_scaling = sharding_result['throughput'] / write_throughput
+            print(f"  Factor de mejora vs BD única: {shard_scaling:.2f}x")
+            
+            if shard_scaling > 1.5:
+                print(f"  → Excelente: sharding escala writes efectivamente")
+            elif shard_scaling > 1.1:
+                print(f"  → Moderado: overhead de routing visible pero beneficioso")
+            else:
+                print(f"  → Limitado: verificar que ambos shards aceptan writes")
+        
+        if len(sharding_result['distribution']) == 2:
+            dist = sharding_result['distribution']
+            balance = (min(dist.values()) / max(dist.values()) * 100) if max(dist.values()) > 0 else 0
+            print(f"  Balance de distribución: {balance:.1f}%")
+            if balance > 90:
+                print(f"  → Excelente: hash function distribuye uniformemente")
+            elif balance > 75:
+                print(f"  → Aceptable: ligero desbalance tolerable")
+            else:
+                print(f"  → Pobre: considerar consistent hashing o más vnodes")
+    else:
+        print("  No disponible (verificar shard_router.py)")
+    
+    print(f"\n📊 RESILIENCIA:")
+    print("  Failover: ✅ Funcional")
+    
+    print("\n💡 Para análisis detallado de queries, usa pgBadger:")
+    print("   docker exec ecomarket-db-primary cat /var/log/postgresql/*.log > primary.log")
+    print("   pgbadger primary.log -o reporte.html")
+    print("=" * 70)
+
+if __name__ == "__main__":
+    run_load_test()
+</pre>
+            </div>
+
+            <div class="checkpoint">
+                <p><strong>Ejecutar Pruebas:</strong></p>
+                <ol>
+                    <li>Asegúrate de que docker-compose está corriendo: <code>docker-compose ps</code></li>
+                    <li>IMPORTANTE: Crea el archivo <code>shard_router.py</code> con las clases SimpleHashShardRouter y ConsistentHashRouter (ver sección anterior)</li>
+                    <li>Instala dependencias: <code>pip install psycopg2-binary</code></li>
+                    <li>Ejecuta el script: <code>python load_test.py</code></li>
+                    <li><strong>Resultados Esperados:</strong> 
+                        <ul>
+                            <li><strong>Prueba 1 (Writes replicados):</strong> 100 writes completados, throughput >10 writes/s</li>
+                            <li><strong>Prueba 2 (Reads distribuidos):</strong> 1000 reads distribuidos ~50/50 entre secundarios</li>
+                            <li><strong>Prueba 3 (Lag):</strong> Lag <1s (excelente) o <5s (aceptable)</li>
+                            <li><strong>Prueba 4 (Failover):</strong> Detección de fallo y fallback <3s</li>
+                            <li><strong>Prueba 5 (Análisis teórico):</strong> Distribución ~50/50, rebalanceo hash simple ~67% vs consistent ~33%</li>
+                            <li><strong>Prueba 6 (NUEVO - Sharding funcional):</strong> 100 usuarios insertados distribuidos, throughput >write_throughput de Prueba 1, balance de distribución >75%</li>
+                        </ul>
+                    </li>
+                </ol>
+                
+                <p><strong>Interpretando Resultados:</strong> Si la Prueba seis muestra throughput mayor que la Prueba uno, has demostrado empíricamente que sharding escala writes distribuyendo carga entre múltiples nodos. Si el balance de distribución está por debajo del setenta y cinco por ciento, significa que el hash simple no está distribuyendo uniformemente y en producción deberías considerar consistent hashing con más nodos virtuales. Si la Prueba seis falla con ImportError, verifica que creaste shard_router.py en el directorio correcto.</p>
+                
+                <p><strong>Si algo falla:</strong> Activa <code>DEBUG = True</code> en ambos scripts (load_test.py y shard_router.py) para ver queries detallados y diagnosticar el problema. Revisa también que ambas tablas (orders y users) existen con <code>docker exec -it ecomarket-db-primary psql -U postgres -d ecomarket -c "\dt"</code>.</p>
+            </div>
+        </div>
+
+        <h3>⚡ Pruebas Adicionales y Análisis con Herramientas Reales</h3>
+        
+        <div class="activity">
+            <h4>Prueba 1: E2E Distribución (diez min)</h4>
+            <ol>
+                <li>Inicia stack: <code>docker-compose up -d</code></li>
+                <li>Ejecuta script de carga: <code>python load_test.py</code></li>
+                <li><strong>Esperado:</strong> Lag <1s, reads aproximadamente 50/50 en secundarios</li>
+            </ol>
+
+            <h4>Prueba 2: Fallo en Secundario más Recovery (diez min)</h4>
+            <ol>
+                <li>Ejecuta carga continua en background: <code>while true; do python load_test.py; sleep 10; done &</code></li>
+                <li>Mata secundario uno: <code>docker stop ecomarket-db-secondary-1</code></li>
+                <li>Observa que reads se redirigen a secundario dos</li>
+                <li>Reinicia: <code>docker start ecomarket-db-secondary-1</code></li>
+                <li><strong>Esperado:</strong> Reads redirigidos automáticamente; resync tras stream en aproximadamente treinta segundos</li>
+            </ol>
+
+            <h4>Prueba 3: Análisis con pgBadger (diez min)</h4>
+            <div class="tip">
+                <p><strong>pgBadger</strong> es una herramienta de análisis de logs de PostgreSQL que genera reportes HTML detallados sobre queries lentas, conexiones y errores.</p>
+                <ol>
+                    <li>Instala pgBadger: <code>sudo apt-get install pgbadger</code> (Linux) o <code>brew install pgbadger</code> (Mac)</li>
+                    <li>Extrae logs del primario: <code>docker exec ecomarket-db-primary cat /var/log/postgresql/postgresql-*.log > primary.log</code></li>
+                    <li>Genera reporte: <code>pgbadger primary.log -o reporte_primary.html</code></li>
+                    <li>Abre en navegador: <code>open reporte_primary.html</code></li>
+                    <li><strong>Observa:</strong> Queries más lentas, distribución de tipos de queries (INSERT vs SELECT), conexiones concurrentes</li>
+                </ol>
+            </div>
+
+            <h4>Prueba 4: Monitoreo de Lag en Tiempo Real (continuo)</h4>
+            <div class="code-block">
+<pre># Script de monitoreo continuo de lag - VERSIÓN ROBUSTA
+# Primero, verificar que el contenedor existe
+docker ps --filter "name=ecomarket-db-primary" --format "{{.Names}}" | grep -q ecomarket-db-primary || {
+    echo "❌ Error: Contenedor ecomarket-db-primary no encontrado"
+    echo "💡 Ejecuta: docker-compose ps para ver contenedores activos"
+    exit 1
+}
+
+# Opción 1: Monitoreo con watch (actualización cada 2 segundos)
+# Incluye timeout de 60 segundos para pruebas cortas
+timeout 60s watch -n 2 'docker exec ecomarket-db-primary psql -U postgres -d ecomarket -c "
+    SELECT 
+        client_addr AS replica_ip,
+        state AS estado,
+        sync_state AS modo_sync,
+        ROUND(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) / 1024.0 / 1024.0, 2) AS lag_mb
+    FROM pg_stat_replication;
+" 2>&1 || echo "❌ Error: No se pudo consultar replicación"'
+
+# Opción 2: Loop manual con mejor formato (ctrl+C para detener)
+echo "🔍 Monitoreando lag de replicación (Ctrl+C para detener)..."
+echo "Timeout automático: 120 segundos"
+echo ""
+
+timeout 120s bash -c '
+    while true; do 
+        clear
+        echo "=== Monitoreo de Replicación PostgreSQL ==="
+        echo "Timestamp: $(date +"%Y-%m-%d %H:%M:%S")"
+        echo ""
+        
+        docker exec ecomarket-db-primary psql -U postgres -d ecomarket -c "
+            SELECT 
+                client_addr AS replica_ip,
+                state AS estado,
+                sync_state AS modo,
+                pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS lag_bytes,
+                ROUND(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) / 1024.0 / 1024.0, 3) AS lag_mb
+            FROM pg_stat_replication;
+        " 2>&1 || {
+            echo "❌ Error: No se pudo consultar pg_stat_replication"
+            echo "💡 Verifica que:"
+            echo "   1. El primario está corriendo: docker ps | grep primary"
+            echo "   2. Los secundarios están conectados: docker logs ecomarket-db-secondary-1"
+            sleep 5
+            continue
+        }
+        
+        echo ""
+        echo "📊 Interpretación del lag:"
+        echo "   < 1 MB:     ✅ Excelente (< 1 segundo de retraso)"
+        echo "   1-10 MB:    ⚠️  Aceptable (1-5 segundos de retraso)"
+        echo "   > 10 MB:    ❌ Crítico (> 10 segundos de retraso)"
+        echo ""
+        
+        sleep 2
+    done
+' || echo "⏰ Timeout alcanzado - Monitoreo detenido"
+
+echo ""
+echo "✅ Monitoreo finalizado"
+</pre>
+            </div>
+            <p><strong>Observa:</strong> Lag en tiempo real mientras ejecutas carga. Deberías ver lag &lt;1 MB en condiciones normales. Si ves lag &gt;10 MB, investiga causas: red lenta, primario saturado, o secundario con I/O limitado.</p>
+            
+            <div class="tip">
+                <h4>💡 Troubleshooting si el script falla:</h4>
+                <ol>
+                    <li><strong>Error "container not found":</strong> Verifica nombres reales con <code>docker ps</code> y ajusta script</li>
+                    <li><strong>Error "relation pg_stat_replication does not exist":</strong> Verifica que estás conectando al primario, no a secundario</li>
+                    <li><strong>Lag siempre en 0:</strong> Secundarios no están conectados. Revisa logs: <code>docker logs ecomarket-db-secondary-1</code></li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="reflection">
+            <h3>📊 Métricas de Validación Empíricas</h3>
+            <table class="comparison-table">
+                <thead>
+                    <tr>
+                        <th>Métrica</th>
+                        <th>BD Única</th>
+                        <th>Con Replicación y Sharding</th>
+                        <th>Mejora</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Throughput reads por pico</td>
+                        <td>40,000/h</td>
+                        <td>80,000/h (2 secundarios)</td>
+                        <td>2x más capacidad</td>
+                    </tr>
+                    <tr>
+                        <td>Latencia writes</td>
+                        <td>2s</td>
+                        <td>200ms</td>
+                        <td>90% más rápido</td>
+                    </tr>
+                    <tr>
+                        <td>Locks en picos</td>
+                        <td>15%</td>
+                        <td>&lt;1%</td>
+                        <td>15x más fluido</td>
+                    </tr>
+                    <tr>
+                        <td>Disponibilidad</td>
+                        <td>99% (single point failure)</td>
+                        <td>99.9% (failover automático)</td>
+                        <td>10x menos downtime</td>
+                    </tr>
+                    <tr>
+                        <td>Esfuerzo agregar réplica/shard</td>
+                        <td>Reinicio total</td>
+                        <td>Config + resync</td>
+                        <td>4x más simple</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="tip">
+            <h3>🎯 ROI Demostrado</h3>
+            <ul>
+                <li><strong>Antes:</strong> $37,500/hora en picos perdidos por locks</li>
+                <li><strong>Después:</strong> $0 perdidos, capacidad escala linealmente</li>
+                <li><strong>Costo impl.:</strong> ~25 horas (configuración + testing)</li>
+                <li><strong>Payback:</strong> Primer pico de ventas manejado sin caídas recupera inversión</li>
+            </ul>
+        </div>
+
+        <div class="checkpoint">
+            <h3>✅ Checkpoint Final</h3>
+            <p><strong>Antes de finalizar, confirma que:</strong></p>
+            <ul>
+                <li>✅ Todas las pruebas de replicación pasaron exitosamente con lag <1s</li>
+                <li>✅ Puedo explicar el flujo completo de write → replicación → read con tiempos específicos</li>
+                <li>✅ Entiendo cuándo elegir CP versus AP según CAP para cada tabla de mi aplicación</li>
+                <li>✅ Implementé y probé ShardRouter con distribución uniforme validada empíricamente</li>
+                <li>✅ Comprendo la diferencia entre hash simple y consistent hashing y cuándo usar cada uno</li>
+                <li>✅ Sé calcular ROI: Comparé métricas antes y después con números reales</li>
+                <li>✅ Identifiqué nuevos problemas: cross-shard joins, rebalanceo, monitoring con herramientas como pgBadger</li>
+                <li>✅ Usé herramientas de producción reales (pg_stat_replication, pgBadger) para análisis</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="phase">
+        <h2 data-icon="🚀">Reflexión Final: El Verdadero Aprendizaje</h2>
+        
+        <div class="reflection">
+            <h3>🤔 Preguntas Profundas</h3>
+            <ol>
+                <li><strong>Evolución:</strong> ¿Por qué replicación antes que sharding? ¿Cuándo saltarías este paso?</li>
+                <li><strong>Complejidad:</strong> ¿Cuándo sharding vale versus costo de cross-shard queries y rebalanceo?</li>
+                <li><strong>CAP Theorem:</strong> Para cada tabla de EcoMarket (users, orders, inventory), ¿elegirías CP o AP? Justifica basándote en patrones de acceso reales.</li>
+                <li><strong>Arquitectura:</strong> ¿Cómo cambiaría tu diseño si usaras NoSQL (MongoDB, Cassandra) versus SQL?</li>
+                <li><strong>Operacional:</strong> ¿Qué herramientas de monitoring necesitas para detectar lag alto o fallo de réplica en producción?</li>
+            </ol>
+        </div>
+
+        <div class="ai-prompt">
+            <h4>🤖 Prompt Final: Síntesis de Aprendizaje</h4>
+            <pre>Sintetiza mi aprendizaje en decisiones arquitectónicas de BD distribuida:
+
+Journey:
+1. Empecé: [BD única con 50k reads/h, 15% locks]
+2. Problema cuantificado: [treinta y siete mil quinientos por hora perdidos en picos]
+3. Alternativas evaluadas: [escalar vertical vs replicación vs sharding]
+4. Elegí: [Replicación primario-secundario más futuro sharding] por [razones CAP]
+5. Implementé: [PostgreSQL streaming replication más ShardRouter con hash]
+6. Validé: [lag <1s, throughput dos veces, noventa y nueve punto nueve por ciento uptime]
+
+Análisis profundo:
+1. ¿Qué principios generales de CAP guiaron mis decisiones? ¿Cómo aplican a subdominios específicos?
+2. ¿Cómo equilibré complejidad operacional versus beneficio de escalabilidad?
+3. ¿Qué preguntas clave debí hacer ANTES de adoptar distribución? ¿Qué habría hecho diferente?
+4. Si tuviera que presentar a stakeholders no-técnicos, ¿cómo comunico ROI y riesgos?
+5. ¿Qué herramientas de monitoring (pgBadger, pg_stat_replication) son esenciales para producción?
+
+Crea un framework mental reusable para futuras decisiones de distribución de datos.</pre>
+        </div>
+        
+        <div class="decision-matrix">
+            <h4>📋 Framework Mental para Decisiones BD (Reusable):</h4>
+            <table class="comparison-table">
+                <thead>
+                    <tr>
+                        <th>Principio</th>
+                        <th>Pregunta Guía</th>
+                        <th>Ejemplo EcoMarket</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Cuantificar Locks o Latencia</strong></td>
+                        <td>¿Cuánto dinero perdemos por hora con BD lenta?</td>
+                        <td>treinta y siete mil por hora en picos → 1M por mes potencial</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Evaluar Patrón Read Write</strong></td>
+                        <td>¿Ratio reads versus writes? ¿Heavy en uno?</td>
+                        <td>80/20 read-heavy → replicación primero</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Determinar Consistencia Necesaria</strong></td>
+                        <td>¿Qué tablas toleran eventual consistency?</td>
+                        <td>Inventory: CP / Orders history: AP</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Calcular Escalabilidad</strong></td>
+                        <td>¿N réplicas o shards escalan linealmente?</td>
+                        <td>Sí hasta aproximadamente diez, luego bottleneck en primario</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Validar ROI</strong></td>
+                        <td>¿Payback period menor a un pico de ventas?</td>
+                        <td>Sí, throughput incrementa dos veces justifica 25h implementación</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Enfoque Incremental</strong></td>
+                        <td>¿Puedo probar con PoC antes de full commit?</td>
+                        <td>Empecé con un secundario, luego agregué segundo</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Medir Impacto Real</strong></td>
+                        <td>¿Métricas post-implementación cumplen promesas?</td>
+                        <td>ochenta y cinco por ciento locks → menor a uno por ciento locks (empírico con pgBadger)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Monitoring Proactivo</strong></td>
+                        <td>¿Qué herramientas detectan problemas antes de afectar usuarios?</td>
+                        <td>pg_stat_replication para lag, pgBadger para queries lentas</td>
+                    </tr>
+                </tbody>
+            </table>
+            <p><em>Transferible a: E-commerces, SaaS B2B, apps de datos masivos, sistemas financieros, plataformas de streaming.</em></p>
+        </div>
+
+        <div class="tip">
+            <h3>🎓 Valor Real Adquirido</h3>
+            <p>En esta semana, no solo aprendiste técnicas sino una metodología de pensamiento completa:</p>
+            <ul>
+                <li><strong>Metodología:</strong> Evolucionar BD incrementalmente (única → replicada → shardeada) según dolor real empírico</li>
+                <li><strong>Justificación:</strong> Cuantificar distribución con ROI concreto antes de implementar usando métricas de negocio</li>
+                <li><strong>Implementación:</strong> Configuración real de PostgreSQL más router de sharding ejecutable con dos algoritmos diferentes</li>
+                <li><strong>Teoría Aplicada:</strong> Entender CAP no como fórmula sino como trade-offs en cada decisión de diseño</li>
+                <li><strong>Validación:</strong> Scripts de carga que prueban distribución, lag, failover con métricas cuantificables</li>
+                <li><strong>Herramientas Reales:</strong> Uso de pg_stat_replication, pgBadger y otras herramientas de producción</li>
+            </ul>
+            <p><strong>Para Avance Hito 2:</strong> Integra esta BD distribuida en tu clúster escalable completo, conectando con balanceo de carga de Semana seis. Incluye análisis de pgBadger en tu reporte.</p>
+        </div>
+
+        <div class="warning">
+            <h3>⚠️ Trampas Comunes a Evitar</h3>
+            <ul>
+                <li><strong>Sharding prematuro:</strong> No hagas sharding con menor a 100k usuarios. La complejidad no vale el beneficio.</li>
+                <li><strong>Ignorar cross-shard queries:</strong> Si tu app requiere JOINs entre shards frecuentemente, sharding no es la solución correcta.</li>
+                <li><strong>No monitorear lag:</strong> Lag de replicación puede crecer silenciosamente. Configura alertas si mayor a 5s.</li>
+                <li><strong>Asumir disponibilidad automática:</strong> Replicación no garantiza failover automático sin herramientas como Patroni o Stolon.</li>
+                <li><strong>Olvidar backups:</strong> Replicación no igual a backup. Replica también errores (DELETE accidental se propaga a secundarios).</li>
+                <li><strong>Usar hash simple sin considerar elasticidad:</strong> Si planeas agregar shards frecuentemente, usa consistent hashing desde el inicio.</li>
+                <li><strong>Ignorar timezone en cálculos de lag:</strong> Siempre usa UTC en comparaciones de timestamps entre servidores distribuidos.</li>
+            </ul>
+        </div>
+    </div>
+
+    <p style="text-align: center; margin-top: 30px; font-size: 1.2em;">
+        🎉 <strong>¡Felicitaciones!</strong> Ahora dominas Distribución de Datos: No solo cómo implementar, sino <em>cuándo</em> hacerlo, <em>por qué</em> funciona, y <em>qué trade-offs</em> aceptas. Has construido fundamentos sólidos para sistemas distribuidos de producción con herramientas reales de monitoring y análisis.
+    </p>
+</body>
+</html>

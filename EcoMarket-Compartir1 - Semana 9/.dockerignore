@@ -1,0 +1,40 @@
+# 🚫 Archivos y carpetas a ignorar en el build de Docker
+
+# Entorno virtual de Python
+.venv/
+venv/
+env/
+
+# Caché de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Datos persistentes
+rabbitmq_data/
+*.db
+*.sqlite
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentación y tests
+README.md
+*.md
+docs/
+tests/
+
+# Archivos temporales
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

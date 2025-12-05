@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "applications": [
+    {
+      "name": "my_app",
+      "description": "My RabbitMQ application",
+      "queues": [
+        {
+          "name": "my_queue",
+          "durable": true,
+          "arguments": {}
+        }
+      ],
+      "exchanges": [
+        {
+          "name": "my_exchange",
+          "type": "direct",
+          "durable": true,
+          "arguments": {}
+        }
+      ],
+      "bindings": [
+        {
+          "source": "my_exchange",
+          "destination": "my_queue",
+          "routing_key": "my_routing_key"
+        }
+      ]
+    }
+  ]
+}

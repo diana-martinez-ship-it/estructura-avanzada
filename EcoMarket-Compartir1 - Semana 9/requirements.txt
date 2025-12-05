@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+pika
+pydantic
+pydantic-settings
+email-validator
+psycopg2-binary
+asyncpg
+python-dotenv
+pyjwt
+pytest
+pytest-asyncio
+httpx
+cryptography
