@@ -1,0 +1,158 @@
+### ECOMARKET API TESTING
+### Archivo de pruebas HTTP para VS Code (usa extensión REST Client)
+### Presiona Ctrl+Alt+R en cada request para ejecutarlo
+
+@baseUrl = http://127.0.0.1:8000
+
+### 1. 🏠 Página principal
+GET {{baseUrl}}/
+
+### 2. 📦 Obtener todos los productos
+GET {{baseUrl}}/api/productos
+
+### 3. 🔗 Estado de conexiones
+GET {{baseUrl}}/api/estado-conexiones
+
+### 4. 🛒 Compra HTTP Directo
+POST {{baseUrl}}/api/compras
+Content-Type: application/json
+
+{
+    "producto_id": 1,
+    "cantidad": 1,
+    "modo": "HTTP_DIRECTO"
+}
+
+### 5. 🔄 Compra con Reintentos Simples
+POST {{baseUrl}}/api/compras
+Content-Type: application/json
+
+{
+    "producto_id": 1,
+    "cantidad": 1,
+    "modo": "REINTENTOS_SIMPLES"
+}
+
+### 6. 📈 Compra con Backoff Exponencial
+POST {{baseUrl}}/api/compras
+Content-Type: application/json
+
+{
+    "producto_id": 1,
+    "cantidad": 1,
+    "modo": "BACKOFF_EXPONENCIAL"
+}
+
+### 7. 🎯 Compra con Reintentos Sofisticados
+POST {{baseUrl}}/api/compras
+Content-Type: application/json
+
+{
+    "producto_id": 1,
+    "cantidad": 1,
+    "modo": "REINTENTOS_SOFISTICADOS"
+}
+
+### 8. 📦 Compra con Redis Queue
+POST {{baseUrl}}/api/compras
+Content-Type: application/json
+
+{
+    "producto_id": 1,
+    "cantidad": 1,
+    "modo": "REDIS_QUEUE"
+}
+
+### 9. 🐰 Compra con RabbitMQ
+POST {{baseUrl}}/api/compras
+Content-Type: application/json
+
+{
+    "producto_id": 1,
+    "cantidad": 1,
+    "modo": "RABBITMQ"
+}
+
+### 10. 🚫 Desactivar servicio HTTP Directo
+POST {{baseUrl}}/api/simular-fallo
+Content-Type: application/json
+
+{
+    "servicio": "http_directo",
+    "activo": false
+}
+
+### 11. ✅ Activar servicio HTTP Directo
+POST {{baseUrl}}/api/simular-fallo
+Content-Type: application/json
+
+{
+    "servicio": "http_directo",
+    "activo": true
+}
+
+### 12. 🚫 Desactivar Reintentos Sofisticados
+POST {{baseUrl}}/api/simular-fallo
+Content-Type: application/json
+
+{
+    "servicio": "reintentos_sofisticados",
+    "activo": false
+}
+
+### 13. ✅ Activar Reintentos Sofisticados
+POST {{baseUrl}}/api/simular-fallo
+Content-Type: application/json
+
+{
+    "servicio": "reintentos_sofisticados",
+    "activo": true
+}
+
+### 14. 🌐 Desactivar Red General (afecta a TODOS)
+POST {{baseUrl}}/api/simular-fallo
+Content-Type: application/json
+
+{
+    "servicio": "general_network",
+    "activo": false
+}
+
+### 15. ✅ Activar Red General
+POST {{baseUrl}}/api/simular-fallo
+Content-Type: application/json
+
+{
+    "servicio": "general_network",
+    "activo": true
+}
+
+### 16. 🔥 Reset completo del sistema
+POST {{baseUrl}}/api/reset-conexiones
+Content-Type: application/json
+
+### 17. 📊 Obtener estado Redis Queue
+GET {{baseUrl}}/api/redis-queue
+
+### 18. 🔄 Procesar siguiente en Redis Queue
+POST {{baseUrl}}/api/redis-queue/procesar
+
+### 19. 🧪 Prueba múltiple de servicios
+POST {{baseUrl}}/api/prueba-servicios
+Content-Type: application/json
+
+{
+    "producto_id": 1,
+    "cantidad": 1
+}
+
+### 20. 👤 Obtener producto específico
+GET {{baseUrl}}/api/productos/1
+
+### 21. ➕ Agregar stock a producto
+POST {{baseUrl}}/api/productos/1/stock
+Content-Type: application/json
+
+{
+    "cantidad": 10
+}

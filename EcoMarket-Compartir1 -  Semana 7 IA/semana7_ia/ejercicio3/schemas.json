@@ -1,0 +1,445 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Product Schemas",
+  "description": "JSON Schema para validación determinista de productos",
+  
+  "definitions": {
+    "Product": {
+      "$id": "#Product",
+      "type": "object",
+      "required": ["id", "name", "price", "currency", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "UUID v4 del producto"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "pattern": "^[\\p{L}\\p{N}\\s\\-_.,()]+$",
+          "description": "Nombre del producto (alfanumérico + espacios/puntuación básica)"
+        },
+        "price": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 999999999.99,
+          "multipleOf": 0.01,
+          "description": "Precio no negativo con 2 decimales"
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["MXN", "USD", "EUR"],
+          "description": "Código ISO 4217 de moneda"
+        },
+        "tags": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 30,
+            "pattern": "^[a-z0-9-]+$"
+          },
+          "description": "Etiquetas únicas (lowercase, guiones)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$",
+          "description": "Timestamp ISO-8601 en UTC (YYYY-MM-DDTHH:mm:ss.sssZ)"
+        }
+      }
+    },
+    
+    "ProductCreateRequest": {
+      "$id": "#ProductCreateRequest",
+      "type": "object",
+      "required": ["name", "price", "currency"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/definitions/Product/properties/name" },
+        "price": { "$ref": "#/definitions/Product/properties/price" },
+        "currency": { "$ref": "#/definitions/Product/properties/currency" },
+        "tags": { "$ref": "#/definitions/Product/properties/tags" }
+      }
+    },
+    
+    "ProductUpdateRequest": {
+      "$id": "#ProductUpdateRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "name": { "$ref": "#/definitions/Product/properties/name" },
+        "price": { "$ref": "#/definitions/Product/properties/price" },
+        "currency": { "$ref": "#/definitions/Product/properties/currency" },
+        "tags": { "$ref": "#/definitions/Product/properties/tags" }
+      }
+    },
+    
+    "ProductResponse": {
+      "$id": "#ProductResponse",
+      "type": "object",
+      "required": ["data", "error", "meta"],
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "oneOf": [
+            { "$ref": "#/definitions/Product" },
+            { "type": "null" }
+          ]
+        },
+        "error": {
+          "oneOf": [
+            { "$ref": "#/definitions/ErrorDetail" },
+            { "type": "null" }
+          ]
+        },
+        "meta": { "$ref": "#/definitions/Meta" }
+      }
+    },
+    
+    "ProductListResponse": {
+      "$id": "#ProductListResponse",
+      "type": "object",
+      "required": ["data", "error", "meta"],
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["items", "total"],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": { "$ref": "#/definitions/Product" }
+                },
+                "total": { "type": "integer", "minimum": 0 },
+                "page": { "type": "integer", "minimum": 1 },
+                "pageSize": { "type": "integer", "minimum": 1, "maximum": 100 }
+              }
+            },
+            { "type": "null" }
+          ]
+        },
+        "error": {
+          "oneOf": [
+            { "$ref": "#/definitions/ErrorDetail" },
+            { "type": "null" }
+          ]
+        },
+        "meta": { "$ref": "#/definitions/Meta" }
+      }
+    },
+    
+    "ErrorDetail": {
+      "$id": "#ErrorDetail",
+      "type": "object",
+      "required": ["code", "msg"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "BAD_REQUEST",
+            "VALIDATION_ERROR",
+            "NOT_FOUND",
+            "CONFLICT",
+            "UNAUTHENTICATED",
+            "FORBIDDEN",
+            "RATE_LIMITED",
+            "INTERNAL_ERROR"
+          ]
+        },
+        "msg": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["field", "issue"],
+            "properties": {
+              "field": { "type": "string" },
+              "issue": { "type": "string" },
+              "received": {}
+            }
+          }
+        }
+      }
+    },
+    
+    "Meta": {
+      "$id": "#Meta",
+      "type": "object",
+      "required": ["timestamp", "requestId"],
+      "additionalProperties": false,
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "latencyMs": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  
+  "examples": {
+    "validProduct": {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Laptop ThinkPad X1",
+      "price": 1299.99,
+      "currency": "USD",
+      "tags": ["electronics", "computers", "lenovo"],
+      "createdAt": "2025-11-26T10:30:00.000Z"
+    },
+    
+    "validCreateRequest": {
+      "name": "iPhone 15 Pro",
+      "price": 999.00,
+      "currency": "USD",
+      "tags": ["electronics", "smartphones", "apple"]
+    },
+    
+    "validUpdateRequest": {
+      "price": 899.00,
+      "tags": ["electronics", "smartphones", "apple", "sale"]
+    },
+    
+    "invalidExamples": {
+      "missingRequired": {
+        "description": "Falta campo obligatorio 'name'",
+        "input": {
+          "price": 100,
+          "currency": "MXN"
+        },
+        "expectedError": {
+          "code": "VALIDATION_ERROR",
+          "msg": "Campos requeridos faltantes",
+          "details": [
+            {
+              "field": "name",
+              "issue": "Campo requerido no proporcionado"
+            }
+          ]
+        }
+      },
+      
+      "invalidType": {
+        "description": "Tipo de dato incorrecto",
+        "input": {
+          "name": "Product",
+          "price": "not-a-number",
+          "currency": "USD"
+        },
+        "expectedError": {
+          "code": "VALIDATION_ERROR",
+          "msg": "Tipo de dato inválido",
+          "details": [
+            {
+              "field": "price",
+              "issue": "Se esperaba number, recibido string",
+              "received": "not-a-number"
+            }
+          ]
+        }
+      },
+      
+      "priceNegative": {
+        "description": "Precio negativo",
+        "input": {
+          "name": "Product",
+          "price": -10.50,
+          "currency": "MXN"
+        },
+        "expectedError": {
+          "code": "VALIDATION_ERROR",
+          "msg": "Violación de restricción",
+          "details": [
+            {
+              "field": "price",
+              "issue": "Debe ser >= 0",
+              "received": -10.50
+            }
+          ]
+        }
+      },
+      
+      "nameTooShort": {
+        "description": "Nombre con menos de 2 caracteres",
+        "input": {
+          "name": "A",
+          "price": 50,
+          "currency": "EUR"
+        },
+        "expectedError": {
+          "code": "VALIDATION_ERROR",
+          "msg": "Longitud inválida",
+          "details": [
+            {
+              "field": "name",
+              "issue": "Mínimo 2 caracteres, recibido 1",
+              "received": "A"
+            }
+          ]
+        }
+      },
+      
+      "currencyInvalid": {
+        "description": "Moneda no soportada",
+        "input": {
+          "name": "Product",
+          "price": 100,
+          "currency": "JPY"
+        },
+        "expectedError": {
+          "code": "VALIDATION_ERROR",
+          "msg": "Valor no permitido",
+          "details": [
+            {
+              "field": "currency",
+              "issue": "Debe ser uno de: MXN, USD, EUR",
+              "received": "JPY"
+            }
+          ]
+        }
+      },
+      
+      "tooManyTags": {
+        "description": "Más de 10 tags",
+        "input": {
+          "name": "Product",
+          "price": 100,
+          "currency": "USD",
+          "tags": ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10", "t11"]
+        },
+        "expectedError": {
+          "code": "VALIDATION_ERROR",
+          "msg": "Array excede longitud máxima",
+          "details": [
+            {
+              "field": "tags",
+              "issue": "Máximo 10 elementos, recibido 11",
+              "received": 11
+            }
+          ]
+        }
+      },
+      
+      "duplicateTags": {
+        "description": "Tags duplicados",
+        "input": {
+          "name": "Product",
+          "price": 100,
+          "currency": "MXN",
+          "tags": ["electronics", "sale", "electronics"]
+        },
+        "expectedError": {
+          "code": "VALIDATION_ERROR",
+          "msg": "Elementos duplicados no permitidos",
+          "details": [
+            {
+              "field": "tags",
+              "issue": "Todos los elementos deben ser únicos",
+              "received": ["electronics", "sale", "electronics"]
+            }
+          ]
+        }
+      },
+      
+      "invalidTagFormat": {
+        "description": "Tag con caracteres no permitidos",
+        "input": {
+          "name": "Product",
+          "price": 100,
+          "currency": "USD",
+          "tags": ["Electronics", "SALE!", "new product"]
+        },
+        "expectedError": {
+          "code": "VALIDATION_ERROR",
+          "msg": "Formato de tag inválido",
+          "details": [
+            {
+              "field": "tags[0]",
+              "issue": "Solo se permiten minúsculas y guiones (a-z0-9-)",
+              "received": "Electronics"
+            },
+            {
+              "field": "tags[1]",
+              "issue": "Solo se permiten minúsculas y guiones (a-z0-9-)",
+              "received": "SALE!"
+            },
+            {
+              "field": "tags[2]",
+              "issue": "Solo se permiten minúsculas y guiones (a-z0-9-)",
+              "received": "new product"
+            }
+          ]
+        }
+      },
+      
+      "invalidDateFormat": {
+        "description": "Fecha no ISO-8601",
+        "input": {
+          "id": "550e8400-e29b-41d4-a716-446655440000",
+          "name": "Product",
+          "price": 100,
+          "currency": "USD",
+          "createdAt": "2025-11-26 10:30:00"
+        },
+        "expectedError": {
+          "code": "VALIDATION_ERROR",
+          "msg": "Formato de fecha inválido",
+          "details": [
+            {
+              "field": "createdAt",
+              "issue": "Debe estar en formato ISO-8601: YYYY-MM-DDTHH:mm:ss.sssZ",
+              "received": "2025-11-26 10:30:00"
+            }
+          ]
+        }
+      },
+      
+      "additionalProperties": {
+        "description": "Propiedades no permitidas",
+        "input": {
+          "name": "Product",
+          "price": 100,
+          "currency": "USD",
+          "extraField": "not-allowed",
+          "anotherExtra": 123
+        },
+        "expectedError": {
+          "code": "VALIDATION_ERROR",
+          "msg": "Propiedades adicionales no permitidas",
+          "details": [
+            {
+              "field": "extraField",
+              "issue": "Propiedad no definida en el schema"
+            },
+            {
+              "field": "anotherExtra",
+              "issue": "Propiedad no definida en el schema"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

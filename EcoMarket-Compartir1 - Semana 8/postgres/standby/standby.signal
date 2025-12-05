@@ -1,0 +1,3 @@
+# Standby configuration
+primary_conninfo = 'host=postgres-primary port=5432 user=replicator password=replicator_password'
+primary_slot_name = 'replication_slot_1'

@@ -1,0 +1,52 @@
+[
+  {
+    "id": 1,
+    "nombre": "Manzana Orgánica",
+    "categoria": "Frutas",
+    "precio": 2.5,
+    "disponible": true,
+    "stock": 138,
+    "descripcion": "Manzanas orgánicas frescas y crujientes",
+    "fecha_agregado": "2025-10-29T18:48:49.369743"
+  },
+  {
+    "id": 2,
+    "nombre": "Tomate Cherry",
+    "categoria": "Verduras",
+    "precio": 3.0,
+    "disponible": true,
+    "stock": 146,
+    "descripcion": "Tomates cherry dulces y jugosos",
+    "fecha_agregado": "2025-10-29T18:48:49.369743"
+  },
+  {
+    "id": 3,
+    "nombre": "Lechuga Hidropónica",
+    "categoria": "Verduras",
+    "precio": 1.8,
+    "disponible": true,
+    "stock": 142,
+    "descripcion": "Lechuga fresca cultivada hidropónicamente",
+    "fecha_agregado": "2025-10-29T18:48:49.369743"
+  },
+  {
+    "id": 4,
+    "nombre": "Zanahoria Orgánica",
+    "categoria": "Verduras",
+    "precio": 2.2,
+    "disponible": true,
+    "stock": 300,
+    "descripcion": "Zanahorias orgánicas ricas en vitaminas",
+    "fecha_agregado": "2025-10-29T18:48:49.369743"
+  },
+  {
+    "id": 5,
+    "nombre": "Palta Hass",
+    "categoria": "Frutas",
+    "precio": 4.5,
+    "disponible": true,
+    "stock": 80,
+    "descripcion": "Paltas Hass cremosas y nutritivas",
+    "fecha_agregado": "2025-10-29T18:48:49.369743"
+  }
+]
